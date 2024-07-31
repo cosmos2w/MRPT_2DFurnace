@@ -35,7 +35,7 @@ field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 skip_field = 1      
 #____________________________________________________________________
 
-NET_SETTINGS = 'Case_Num = 300\tn_field_info = 36\tn_baseF = 40\tnet_Y_Gin=[ n_base + 1 , 60, 60, n_field_info]\tConNet=[n_field_info, 50, 50, n_field_info]\n'
+NET_SETTINGS = f'Case_Num = {Case_Num}\tn_field_info = {n_field_info}\tn_baseF = {n_baseF}\tnet_Y_Gin=[ n_base + 1 , 60, 60, n_field_info]\tConNet=[n_field_info, 50, 50, n_field_info]\n'
 NET_NAME = f'F2F_Input_{field_names[skip_field]}'
 
 class CPU_Unpickler(pickle.Unpickler):
