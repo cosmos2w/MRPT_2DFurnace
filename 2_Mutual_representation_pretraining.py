@@ -32,12 +32,12 @@ field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 Unified_Weight = 5.0 # Contribution of the unified feature
 
 #Transformer layer parameters
-num_heads = 8
+num_heads = 9
 num_layers = 1
 #____________________________________________________________________
 
 NET_SETTINGS = 'Field_weights [^2.0] & Unified 5.0, use drop-out 0.40 & 0.10 & 0.05\tUnified_Weight = 5.0\tn_field_info = 36\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
-NET_NAME = ['MRPT']
+NET_NAME = ['MRPT_Standard']
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -176,8 +176,8 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             att_index_expanded = att_index.unsqueeze(0).repeat(len(device_ids), 1, 1)
             
-            output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
-            # output, Unified_output = net(U, Y, G, num_heads)
+            # output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
+            output, Unified_output = net(U, Y, G, num_heads)
             output_stacked = torch.stack(output, dim=0) 
             # print("output_stacked shape:", output_stacked.shape)  # Should print [n_fields (from), n_batch, n_point_select, n_fields+1 (for, plus a Unifed)]
             loss = 0
@@ -233,8 +233,9 @@ if __name__ == '__main__':
             with torch.no_grad():  # Make sure  to use no_grad for evaluation in test phase
 
                 # print('att_index is', att_index)
-                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N_P_Selected = 1000):
-                    output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
+                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N_P_Selected = 2000):
+                    # output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
+                    output, Unified_output = net(U, Y, G, num_heads)
                     output_stacked = torch.stack(output, dim=0) 
                     
                     for field_idx in range(len(field_names)):  # Calculating the losses to reconstruct field_idx(th) field from all fields
@@ -283,7 +284,7 @@ if __name__ == '__main__':
             formatted_att_index = str(att_index_list)
             for field_idx in range(len(field_names)):
                 # Determine field name or unified feature
-                with open(f'Loss_csv_PreTraining/train_test_loss_Mutual/train_test_loss_{NET_NAME}_For_{field_names[field_idx]}.csv', 'at', newline='') as fp:
+                with open(f'Loss_csv/train_test_loss_Mutual/train_test_loss_{NET_NAME}_For_{field_names[field_idx]}.csv', 'at', newline='') as fp:
                     writer = csv.writer(fp, delimiter='\t')
                     if ((epoch + 1) // PRINT_NUM == 1):
                         fp.write(NET_SETTINGS)
@@ -295,7 +296,7 @@ if __name__ == '__main__':
                     row_data = [epoch + 1, train_loss[field_idx].item(), test_loss[field_idx].item()] + \
                             [item for pair in zip(train_losses[field_idx].tolist(), test_losses[field_idx].tolist()) for item in pair]
                     writer.writerow(row_data)
-            with open(f'Loss_csv_PreTraining/train_test_loss_Mutual/train_test_loss_{NET_NAME}_GlobalUnifed.csv', 'at', newline='') as fp:
+            with open(f'Loss_csv/train_test_loss_Mutual/train_test_loss_{NET_NAME}_GlobalUnifed.csv', 'at', newline='') as fp:
                 writer = csv.writer(fp, delimiter='\t')
                 if ((epoch + 1) // PRINT_NUM == 1):
                     fp.write(NET_SETTINGS)

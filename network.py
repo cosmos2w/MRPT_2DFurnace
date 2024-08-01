@@ -218,7 +218,7 @@ class SelfAttention(nn.Module):
         self.norm = nn.LayerNorm(n_field_info)
         self.norm2 = nn.LayerNorm(n_field_info)
 
-    def forward(self, U):
+    def forward(self, U, field_idx):
 
         Q = self.query(U)
         K = self.key(U)
@@ -236,7 +236,12 @@ class SelfAttention(nn.Module):
 
         # Residual connection
         residual = U.mean(dim=2)  # Reducing along the n_field dimension to match output shape
-        output += residual
+
+        if field_idx > 0:
+            Self_feature = U[:, :, field_idx] # extract the latent feature to reconstruct the field_idx(th) field extracted from itself
+            output += Self_feature
+        else:
+            output += residual
         # output = self.norm(output + residual)
         
         # norm = self.norm(output + residual)
@@ -844,7 +849,7 @@ class Mutual_Representation_PreTrain_Net(nn.Module): # Pre-training F2F task via
         ])
         
         self.FieldMerges = nn.ModuleList([
-            SelfAttention_EX(n_field_info, num_fields, dropout_rate = 0.10) for _ in range(num_fields)
+            SelfAttention(n_field_info, num_fields, dropout_rate = 0.10) for _ in range(num_fields)
         ])
         self.FinalMerge = SelfAttention(n_field_info, num_fields, dropout_rate = 0.05) 
 
@@ -881,16 +886,12 @@ class Mutual_Representation_PreTrain_Net(nn.Module): # Pre-training F2F task via
         compressed_info_ALL = torch.stack(compressed_info_list, dim=-1)
         return compressed_info_ALL
 
-    def forward(self, cond, Y, Gin, att_index, num_heads):
+    def forward(self, cond, Y, Gin, num_heads):
 
         n_batch = cond.shape[0]
         n_fields = Gin.shape[-1]
         baseF = self.PosNet(Y)
 
-        att_index = att_index[0]
-        # print('att_index.shape is', att_index.shape)
-        # print('cond.shape is', cond.shape)
-            
         Gout_list = []
         U_Unified_list = []
         for field_idx in range(n_fields):   # Reconstructing the field_idx(th) field
@@ -898,16 +899,7 @@ class Mutual_Representation_PreTrain_Net(nn.Module): # Pre-training F2F task via
             # print('field_name is', field_name)
             field_info = self._compress_data(baseF, Gin, field_idx, num_heads) # [n_batch, n_field_info, n_fields]: The latent representations from one Encoder towards the field_idx(th) field
             # print('field_info.shape is', field_info.shape)
-
-            # print(f'att_index[field_idx] of {field_name} is', att_index[field_idx])
-            fields_to_exclude = att_index[field_idx, -2:].tolist()  # Determine fields to exclude based on performance;
-            # Check if the current field index is in the fields to exclude
-            if field_idx in fields_to_exclude:
-                # If yes, extend the exclusion to include one more index
-                fields_to_exclude = att_index[field_idx, -3:].tolist()  # Now taking the last four indices
-            # print(f'fields_to_exclude of {field_name} is', fields_to_exclude)
-            
-            U_Unified = self.FieldMerges[field_idx](field_info, field_idx, fields_to_exclude) #   [n_batch, n_field_info]: Unified latent representations from one Encoder towards the field_idx(th) field
+            U_Unified = self.FieldMerges[field_idx](field_info, field_idx) #   [n_batch, n_field_info]: Unified latent representations from one Encoder towards the field_idx(th) field
             # print('U_Unified.shape is', U_Unified.shape)
 
             field_outputs = []
@@ -928,7 +920,7 @@ class Mutual_Representation_PreTrain_Net(nn.Module): # Pre-training F2F task via
         
         Global_Unified_U = torch.stack(U_Unified_list, dim=2) #   [n_batch, n_field_info, n_fields]
         # print('Global_Unified_U.shape is', Global_Unified_U.shape)
-        Global_Unified_U = self.FinalMerge(Global_Unified_U)   #   [n_batch, n_field_info]
+        Global_Unified_U = self.FinalMerge(Global_Unified_U, field_idx = -1)   #   [n_batch, n_field_info]
 
         Global_Unified_field_outputs = []
         for field_name, field_net in self.field_nets.items(): # Generate all the fields
