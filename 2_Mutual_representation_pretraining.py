@@ -37,7 +37,7 @@ num_layers = 1
 #____________________________________________________________________
 
 NET_SETTINGS = 'Field_weights [^2.0] & Unified 5.0, use drop-out 0.40 & 0.10 & 0.05\tUnified_Weight = 5.0\tn_field_info = 36\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
-NET_NAME = ['MRPT_Standard']
+NET_NAME = 'MRPT_Standard'
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
