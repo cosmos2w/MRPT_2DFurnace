@@ -11,3 +11,6 @@ data_split/
 
 Output_Net/
 *.pth
+
+indices/
+*.pkl

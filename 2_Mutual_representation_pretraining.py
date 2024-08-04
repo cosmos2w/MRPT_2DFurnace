@@ -51,7 +51,7 @@ def get_data_iter(U, Y, G, N_P_Selected = 600, batch_size = 101): # random sampl
     indices = list(range(num_examples))
     np.random.shuffle(indices)  # 样本的读取顺序是随机的
     for i in range(0, num_examples, batch_size):
-        j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) # 最后一次可能不足一个batch
+        j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
         selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
@@ -106,7 +106,7 @@ if __name__ == '__main__':
     with open(f'Loss_csv/train_test_loss_Mutual/train_test_loss_{NET_NAME}_GlobalUnifed.csv', 'wt') as fp:
         pass
 
-    with open('data_split/data_split_Multi_{}.pic'.format(Case_Num), 'rb') as fp: #打开用于训练DataLoss的数据集 !!文件名需要记得修改!!
+    with open('data_split/data_split_Multi_{}.pic'.format(Case_Num), 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train = data_split.U_train.to(device)
