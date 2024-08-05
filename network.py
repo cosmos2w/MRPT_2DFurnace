@@ -520,7 +520,6 @@ class Self_Representation_PreTrain_Net(nn.Module):
 
         # Up-lifting
         self.net_Y_Gins = nn.ModuleList([PositionNet(layer_size=[ n_base + 1 , 60, 60, n_field_info]) for _ in range(num_fields)])
-        # self.net_Y_Gins = nn.ModuleList([MLP(layer_size=[ n_base + num_fields , 100, 100, 100, n_field_info]) for _ in range(num_fields)])
 
         # Create multiple layers of the transformer
         self.transformer_layers = nn.ModuleList([
@@ -528,27 +527,14 @@ class Self_Representation_PreTrain_Net(nn.Module):
         ])
         # Add a final LayerNorm before taking the mean
         self.final_norm = nn.LayerNorm(n_field_info)
-        # self.final_norms = nn.ModuleList([nn.LayerNorm(n_field_info) for _ in range(num_fields)])
         
         #To combine different feature vectors
         self.UnifyAttention_layers = nn.ModuleList([
             SelfAttention(n_field_info*2, num_fields) for _ in range(num_fields)
         ])
         self.FinalMerge = SelfAttention(n_field_info, num_fields, dropout_rate = 0.05) 
-        self.MLPs = nn.ModuleList([MLP(layer_size=[n_field_info, 50, n_field_info]) for _ in range(num_fields)])
 
         self.PosNet = PositionNet(layer_size=[2, 50, 50, 50, n_base])
-        self.PosNets = nn.ModuleDict({
-            'T':   PositionNet([2, 50, 50, 50, n_base]),
-            'P':   PositionNet([2, 50, 50, 50, n_base]),
-            'Vx':  PositionNet([2, 50, 50, 50, n_base]),
-            'Vy':  PositionNet([2, 50, 50, 50, n_base]),
-            'O2':  PositionNet([2, 50, 50, 50, n_base]),
-            'CO2': PositionNet([2, 50, 50, 50, n_base]),
-            'H2O': PositionNet([2, 50, 50, 50, n_base]),
-            'CO':  PositionNet([2, 50, 50, 50, n_base]),
-            'H2':  PositionNet([2, 50, 50, 50, n_base])
-        })
         # self.Unified_field_net = ConditionNet(layer_size=[n_field_info, 50, 50, n_base])
         self.field_nets = nn.ModuleDict({
             'T':   ConditionNet([n_field_info, 50, 50, n_base]),
@@ -560,17 +546,6 @@ class Self_Representation_PreTrain_Net(nn.Module):
             'H2O': ConditionNet([n_field_info, 50, 50, n_base]),
             'CO':  ConditionNet([n_field_info, 50, 50, n_base]),
             'H2':  ConditionNet([n_field_info, 50, 50, n_base])
-        })
-        self.field_nets_2 = nn.ModuleDict({
-            'T':   ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'P':   ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'Vx':  ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'Vy':  ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'O2':  ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'CO2': ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'H2O': ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'CO':  ConditionNet([n_field_info*2, 50, 50, n_base]),
-            'H2':  ConditionNet([n_field_info*2, 50, 50, n_base])
         })
 
     def _compress_data(self, Y, Gin, num_heads):
@@ -593,56 +568,20 @@ class Self_Representation_PreTrain_Net(nn.Module):
         compressed_info_ALL = torch.stack(compressed_info_list, dim=-1)
         return compressed_info_ALL
 
-    def UnifyAttention(self, field_info):
-        U_sliced_transformed = []
-        
-        for field_idx in range(field_info.shape[-1]):
-            U_Unified = self.UnifyAttention_layers[field_idx](field_info)
-            U_sliced_transformed.append(U_Unified)
-        
-        # Stack the transformed slices to form a new tensor
-        U_transformed = torch.stack(U_sliced_transformed, dim=-1)
-        Output = field_info + U_transformed  # Add the residual connection
-
-        return Output
-
-    def mlp_transform(self, field_info):
-        # Apply MLP to each slice and store the results in a list
-        U_sliced_transformed = []
-        for field_idx in range(field_info.shape[-1]):
-            U_sliced = field_info[:, :, field_idx]
-            U_sliced_transformed.append( self.MLPs[field_idx](U_sliced) )
-        # Stack the transformed slices to form a new tensor
-        U_transformed = torch.stack(U_sliced_transformed, dim=-1)
-        return U_transformed
-
     def forward(self, cond, Y, Gin, num_heads):
         n_batch = cond.shape[0]
         n_fields = Gin.shape[-1]
         baseF = self.PosNet(Y)
 
-        # field_info = self._compress_data(Y, Gin, num_heads)
         field_info = self._compress_data(baseF, Gin, num_heads)        
         U = field_info
-        # U = self.mlp_transform(field_info)
-
-        # U_transformed = self.UnifyAttention(field_info)
-        # U_Unified = self.FinalMerge(U_transformed)
-        U_Unified = self.FinalMerge(U)
-        # U_Unified = self.FinalMerge(field_info)
-
+        U_Unified = self.FinalMerge(U, -1)
         # Compute outputs for each field using the corresponding network
         field_outputs = {}
         for field_idx, (field_name, field_net) in enumerate(self.field_nets.items()):
-        # for field_idx, (field_name, field_net) in enumerate(self.field_nets_2.items()):
             
             U_sliced = U[:, :, field_idx]
-            
             coef = field_net(U_sliced)
-
-            # Pre_coef = self.Unified_field_net(U_sliced).squeeze(1)
-            # coef = field_net(Pre_coef)
-            # baseF = self.PosNets[field_name](Y)  # This computes the base functions for the field
             combine = coef * baseF
             field_output = torch.sum(combine, dim=2, keepdim=True)
             field_outputs[field_name] = field_output
@@ -650,28 +589,19 @@ class Self_Representation_PreTrain_Net(nn.Module):
         # Compute outputs for each field using the corresponding network
         field_outputs_Unified = {}
         for field_name, field_net in self.field_nets.items(): # Generate all the fields
-        # for field_name, field_net in self.field_nets_2.items():
             
             coef = field_net(U_Unified)
-
-            # Pre_coef = self.Unified_field_net(U_Unified).squeeze(1)
-            # coef = field_net(Pre_coef)
-            # baseF = self.PosNets[field_name](Y)  # This computes the base functions for the field
             combine = coef * baseF
             field_output = torch.sum(combine, dim=2, keepdim=True)
             field_outputs_Unified[field_name] = field_output        
 
         Gout_list = []
-        # Stack all field outputs
         Gout = torch.cat(list(field_outputs.values()), dim=-1)
-        # Reshape the output if necessary to match the desired shape
-        Gout = Gout.view(U.size(0), -1, len(self.field_nets))  # Assuming the second dimension is correctly sized
+        Gout = Gout.view(U.size(0), -1, len(self.field_nets))  
         Gout_list.append(Gout)
 
-        # Stack all field outputs
         Gout_Unified = torch.cat(list(field_outputs_Unified.values()), dim=-1)
-        # Reshape the output if necessary to match the desired shape
-        Gout_Unified = Gout_Unified.view(U.size(0), -1, len(self.field_nets))  # Assuming the second dimension is correctly sized
+        Gout_Unified = Gout_Unified.view(U.size(0), -1, len(self.field_nets))  
         Gout_list.append(Gout_Unified)
 
         return Gout_list

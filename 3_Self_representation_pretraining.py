@@ -33,7 +33,7 @@ excluded_field = 'NONE' # Define the field that will not be trained in this stag
 #Transformer layer parameters
 num_heads = 9
 num_layers = 1
-NET_SETTINGS = 'N_P_Selected=1000, Unified PosNet, Ave Pooling, Position encoding for up-lifting, MLP NOT applied in transformer, use LARGE drop-out 0.30 & 0.05\tn_field_info = 36\tUnified_Weight = 5.0\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[1+n_base, 60, 60, n_field_info]\tConNets=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
+NET_SETTINGS = 'N_P_Selected=600\tn_field_info = 36\tUnified_Weight = 5.0\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[1+n_base, 60, 60, n_field_info]\tConNets=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
 
 NET_NAME = 'SRPT_Standard'
 Unified_Weight = 5.0 # Contribution of the unified feature
