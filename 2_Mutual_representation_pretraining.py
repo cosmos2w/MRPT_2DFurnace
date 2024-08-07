@@ -26,7 +26,7 @@ device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else 
 N_EPOCH = 200000
 Case_Num = 300
 n_field_info = 36
-n_baseF = 40 #基函数数量
+n_baseF = 40 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 
 Unified_Weight = 5.0 # Contribution of the unified feature

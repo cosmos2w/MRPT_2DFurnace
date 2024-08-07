@@ -528,10 +528,6 @@ class Self_Representation_PreTrain_Net(nn.Module):
         # Add a final LayerNorm before taking the mean
         self.final_norm = nn.LayerNorm(n_field_info)
         
-        #To combine different feature vectors
-        self.UnifyAttention_layers = nn.ModuleList([
-            SelfAttention(n_field_info*2, num_fields) for _ in range(num_fields)
-        ])
         self.FinalMerge = SelfAttention(n_field_info, num_fields, dropout_rate = 0.05) 
 
         self.PosNet = PositionNet(layer_size=[2, 50, 50, 50, n_base])
@@ -935,7 +931,6 @@ class Direct_SensorToFeature(nn.Module):
         Predicted_Feature = self.MLP(Gin_flatten)
     
         return Predicted_Feature
-
 
 # To recover the unified latent feature from single-field sparse measurements
 class Mutual_SensorToFeature(nn.Module):

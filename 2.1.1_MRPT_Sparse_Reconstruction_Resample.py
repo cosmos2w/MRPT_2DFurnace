@@ -1,7 +1,7 @@
 
 #__________________________________________________________________________________________________________________________________________
 # In this version, the code will load the pretrained net
-# Downstream tasks; Generate random sparse sensor points from the Data_split, recover the unified latent feature using a MLP, and then rebuild all the fields
+# Comparing with direct sparse reconstruction, here in every epoch the sparse sensors will be resampled, varying *field type, number and positions.
 #__________________________________________________________________________________________________________________________________________
 
 import sys
@@ -9,6 +9,7 @@ sys.path.append('..')
 
 import io
 import csv
+import random
 import numpy as np 
 
 import torch
@@ -21,27 +22,28 @@ from constant import DataSplit
 from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference
 
 # Specify the GPUs to use
-device_ids = [1]
+device_ids = [2]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 n_fields = len(field_names)
 N_EPOCH = 1000000
+N_Report = 5
 Case_Num = 300
 
 EVALUATE = True
 INDICE_RENEW = False
-ADD_NOISE = True
+ADD_NOISE = False
 mu = 0
-sigma = 0.03
+sigma = 0.05
 
 n_field_info = 36
 n_baseF = 40 
 n_cond = 11 #Length of the condition vector in U
 
 field_idx = 0 # The field used for sparse reconstruction, 4 = O2
-N_selected = 25  # Points to be extracted for Y_select
+N_selected = 50  # Points to be extracted for Y_select
 N_P_Selected = 1000 # points to evaluate performances
 #Transformer layer parameters
 num_heads = 9
@@ -52,10 +54,10 @@ min_val = -3.0
 max_val = 3.0
 Unifed_weight = 5.0
 
-NET_TYPE = int(1) 
+NET_TYPE = int(0) 
                 # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
-NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\tADD_NOISE is {ADD_NOISE}\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_N{N_selected}_Noise5', f'Direct_SensorToFeature_N{N_selected}_Noise3']
+NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tIn every epoch the sparse sensors will be resampled, varying field type, number and positions\tADD_NOISE is {ADD_NOISE}\thidden_sizes = {hidden_sizes}\n'
+NET_NAME = [f'MRPT_SensorToFeature_Resample', f'Direct_SensorToFeature']
 
 PreTrained_Net_Name = 'net_MRPT_Standard_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
@@ -114,11 +116,11 @@ def Denormalize_data(normalized_data, min_val, max_val):
 
 if __name__ == '__main__':
 
-    with open(f'Loss_csv/train_test_loss_reconstruction/train_test_loss_S2F_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp: 
+    with open(f'Loss_csv/train_test_loss_S2F_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp: 
         pass
 
     if EVALUATE is True:
-        with open(f'Loss_csv/train_test_loss_reconstruction/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
+        with open(f'Loss_csv/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
             pass
         # Export the results to a new CSV file & evaluate the field-reconstruction performance
         with open(f'LatentRepresentation/predictions_Train_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
@@ -146,51 +148,6 @@ if __name__ == '__main__':
         n_inputF = U_train.shape[-1]
         n_pointD = Y_train.shape[-1]
 
-        indices_path = f'indices/Y_select_indices_C{Case_Num}_N{N_selected}.pkl'
-        if INDICE_RENEW is True:
-            Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected].numpy()
-
-            with open(indices_path, 'wb') as f:
-                pickle.dump(Y_select_indices, f)
-            print(f'Successfully saved Y_select_indices at {indices_path}')
-        else:
-            with open(indices_path, 'rb') as f:
-                Y_select_indices = pickle.load(f)
-            print(f'Successfully loaded Y_select_indices at {indices_path}')
-        Yin_train = Y_train[:, Y_select_indices, :].to(device)
-        Yin_test = Y_test[:, Y_select_indices, :].to(device)
-        print('Y_train.shape = ', Y_train.shape)
-        print('Yin_train.shape = ', Yin_train.shape)
-
-        # Extract the temperature values (field_idx = 0) from G_train and G_test or other SELECTED field
-        Gin_train = G_train[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  # Select the first field (temperature)
-        Gin_test = G_test[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  # Select the first field (temperature)
-        print('Gin_Train.shape = ', Gin_train.shape)
-
-        if ADD_NOISE is True:
-            # Generate Gaussian noise
-            noise_train = torch.randn_like(Gin_train) * sigma + mu
-            noise_test = torch.randn_like(Gin_test) * sigma + mu
-            # Add the noise to the original tensors
-            Gin_train = Gin_train + noise_train
-            Gin_test  = Gin_test + noise_test
-
-        # Save Y_select & the corresponding temperature value to a CSV file
-        with open(f'Y_select/Y_select_Train_{NET_NAME[NET_TYPE]}.csv', 'w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(['Case', 'Point Index', 'X Coordinate', 'Y Coordinate', 'Temperature'])
-            for case in range(Yin_train.size(0)):
-                for i, point_idx in enumerate(Y_select_indices):  # Removed .cpu().numpy()
-                    csvwriter.writerow([case, point_idx, Yin_train[case, i, 0].item(), Yin_train[case, i, 1].item(), Gin_train[case, i, 0].item()])
-
-        # Save Y_select & the corresponding temperature value to a CSV file
-        with open(f'Y_select/Y_select_Test_{NET_NAME[NET_TYPE]}.csv', 'w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(['Case', 'Point Index', 'X Coordinate', 'Y Coordinate', 'Temperature'])
-            for case in range(Yin_train.size(0)):
-                for i, point_idx in enumerate(Y_select_indices):  # Removed .cpu().numpy()
-                    csvwriter.writerow([case, point_idx, Yin_train[case, i, 0].item(), Yin_train[case, i, 1].item(), Gin_train[case, i, 0].item()])
-
     # Define the network
     if (NET_TYPE == 0):
         layer_sizes = [n_field_info * 9] + hidden_sizes + [n_field_info]  
@@ -208,7 +165,7 @@ if __name__ == '__main__':
 
     # Wrap the model with DataParallel
     net = nn.DataParallel(net, device_ids=device_ids)
-    optimizer = optim.Adam(net.parameters(), lr=0.001, weight_decay=5.0E-5) 
+    optimizer = optim.Adam(net.parameters(), lr=0.0005, weight_decay=5.0E-5) 
 
     # Set up early stopping parameters
     patience = 100
@@ -223,6 +180,30 @@ if __name__ == '__main__':
     field_weights = field_weights.to(device)
 
     for epoch in range(N_EPOCH):
+
+        #___In every epoch, resample the sensor points___________________________________________________________________
+        N_selected_resample = random.randint(15, 50)
+        field_idx_resample = random.randint(0, 8)
+        
+        Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected_resample].numpy()
+
+        Yin_train = Y_train[:, Y_select_indices, :].to(device)
+        Yin_test = Y_test[:, Y_select_indices, :].to(device)
+        print('Yin_train.shape = ', Yin_train.shape)
+
+        # Extract the temperature values (field_idx = 0) from G_train and G_test or other SELECTED field
+        Gin_train = G_train[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  # Select the first field (temperature)
+        Gin_test = G_test[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  # Select the first field (temperature)
+        print('Gin_Train.shape = ', Gin_train.shape)
+
+        if ADD_NOISE is True:
+            # Generate Gaussian noise
+            noise_train = torch.randn_like(Gin_train) * sigma + mu
+            noise_test = torch.randn_like(Gin_test) * sigma + mu
+            # Add the noise to the original tensors
+            Gin_train = Gin_train + noise_train
+            Gin_test  = Gin_test + noise_test
+        #_______________________________________________________________________________________________________________
 
         train_loss = 0
         train_losses = torch.zeros(len(field_names)+1, device=device)
@@ -241,7 +222,6 @@ if __name__ == '__main__':
             # 梯度清零
             loss = 0
             optimizer.zero_grad()
-            # print('Out there, Yin.shape is', Yin.shape)
 
             #   (1) Obtain the predicted features using the randomly selected sparse measurements ______________________________________________________________________________________________________________
             #       Extract latent features from the pre-trained net and normalize them, inclduing Train_ALL_Unified_U and Train_Global_Unified_U ______________________________________________________________
@@ -291,7 +271,7 @@ if __name__ == '__main__':
 
             #   (2) Upon evaluation, denormalize the Unified_Feature_output, and reconstruct all the fields using the pre-trained net _____________________________________________________________________________
             #       Calculate the field reconstruction losses in the train set ____________________________________________________________________________________________________________________________________
-            if EVALUATE is True and (epoch + 1) % 10 == 0:
+            if EVALUATE is True and (epoch + 1) % N_Report == 0:
                 with torch.no_grad():
 
                     # Export the results to a new CSV file & evaluate the field-reconstruction performance
@@ -331,7 +311,7 @@ if __name__ == '__main__':
         #   (3) After the training loop, enter the test loop and further finish the evaluation steps _______________________________________________________________________________________________________
         #       Now, load the data in the test set, and then obtain the predicted features using the randomly selected sparse measurements _________________________________________________________________
         #       Calculate the losses between the features from pre-trained net and sparsely recovered features _____________________________________________________________________________________________
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % N_Report == 0:
 
             with torch.no_grad():  # Use no_grad for evaluation in test phase
                 #   for U, Y, G, ID in get_data_iter(U_test, Yin_test, Gin_test, test_info_data):
@@ -417,9 +397,9 @@ if __name__ == '__main__':
             #   (5) Finished all the works, now print and write the rest contents ________________________________________________________________________________________________________________
 
                 # Write to CSV file
-                with open(f'Loss_csv/train_test_loss_reconstruction/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'at', newline='') as fp:
+                with open(f'Loss_csv/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'at', newline='') as fp:
                     writer = csv.writer(fp, delimiter='\t')
-                    if ((epoch + 1) // 10 == 1):
+                    if ((epoch + 1) // N_Report == 1):
                         header = ['Epoch', 'Overall_Train_Loss', 'Overall_Test_Loss']
                         interleaved_field_names = [fn for field_name in field_names for fn in (f'Train_{field_name}_loss', f'Test_{field_name}_loss')]
                         header.extend(interleaved_field_names)
@@ -432,9 +412,6 @@ if __name__ == '__main__':
                         row_data.append(f'{field_test_loss.item()}')
                     writer.writerow(row_data)
 
-            # combined_loss = train_loss_weight*Total_train_loss_Data + test_loss_weight*Total_test_loss_Data
-            # combined_loss = train_loss_weight*train_loss + test_loss_weight*test_loss
-            # combined_loss = train_loss_weight*train_losses[n_fields] + test_loss_weight*test_losses[n_fields]
             combined_loss = train_loss_weight*Total_Field_train_loss_Data + test_loss_weight*Total_Field_test_loss_Data
 
             print(f'Epoch {epoch+1}/{N_EPOCH}, Train Loss: {train_loss.item()}, Test Loss: {test_loss.item()}')
@@ -450,18 +427,15 @@ if __name__ == '__main__':
                 print()
 
             # Write S2F loss to CSV file
-            with open(f'Loss_csv/train_test_loss_reconstruction/train_test_loss_S2F_{NET_NAME[NET_TYPE]}.csv', 'at', newline='') as fp:
+            with open(f'Loss_csv/train_test_loss_S2F_{NET_NAME[NET_TYPE]}.csv', 'at', newline='') as fp:
                 writer = csv.writer(fp, delimiter='\t')
-                if ((epoch + 1) // 10 == 1):
+                if ((epoch + 1) // N_Report == 1):
                     fp.write(NET_SETTINGS)
                     header = ['Epoch', 'Train_Loss', 'Test_Loss']
-                    # interleaved_field_names = ['Train_Unifed_loss', 'Test_Unified_loss']
-                    # header.extend(interleaved_field_names)
                     interleaved_field_names = [fn for name in field_names + ['Unified_feature'] for fn in (f'Train_{name}_loss', f'Test_{name}_loss')]
                     header.extend(interleaved_field_names)
                     writer.writerow(header)
                 
-                # row_data = [epoch + 1, train_loss.item(), test_loss.item()] + [train_losses[ len(field_names) ].item(), test_losses[ len(field_names) ].item()] + \
                 row_data = [epoch + 1, train_loss.item(), test_loss.item()] + [item for pair in zip(train_losses.tolist(), test_losses.tolist()) for item in pair]
                 writer.writerow(row_data)
 
