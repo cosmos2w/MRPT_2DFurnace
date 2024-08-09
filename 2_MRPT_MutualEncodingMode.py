@@ -124,7 +124,7 @@ if __name__ == '__main__':
     field_weights_default = torch.tensor([1.0] * 9)  # Replace with actual weights if needed
     field_weights_default = field_weights_default.to(device)
 
-    net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=9).to(device)
+    net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
 
     # Wrap the model with DataParallel 
     net = nn.DataParallel(net, device_ids=device_ids)
@@ -232,7 +232,6 @@ if __name__ == '__main__':
 
             with torch.no_grad():  # Make sure  to use no_grad for evaluation in test phase
 
-                # print('att_index is', att_index)
                 for U, Y, G in get_data_iter(U_test, Y_test, G_test, N_P_Selected = 2000):
                     # output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
                     output, Unified_output = net(U, Y, G, num_heads)
@@ -265,7 +264,6 @@ if __name__ == '__main__':
             Unified_test_losses /= test_batch_count
             Total_test_loss_Data /= test_batch_count
             
-            # combined_loss = train_loss_weight*Total_train_loss_Data + test_loss_weight*Total_test_loss_Data
             combined_loss = train_loss_weight*Unified_train_loss + test_loss_weight*Unified_test_loss
 
             print(f'Epoch {epoch+1}/{N_EPOCH}, Total Train Loss: {Total_train_loss_Data.item()}; Total Test Loss: {Total_test_loss_Data.item()}')
@@ -280,8 +278,6 @@ if __name__ == '__main__':
                 print(f'Unifed Train Loss for {field_name}: {Unified_train_losses[field_idx].item()}; Unified Test Loss for {field_name}: {Unified_test_losses[field_idx].item()}')
 
             # Write to CSV file
-            att_index_list = att_index.tolist()
-            formatted_att_index = str(att_index_list)
             for field_idx in range(len(field_names)):
                 # Determine field name or unified feature
                 with open(f'Loss_csv/train_test_loss_Mutual/train_test_loss_{NET_NAME}_For_{field_names[field_idx]}.csv', 'at', newline='') as fp:
@@ -307,8 +303,7 @@ if __name__ == '__main__':
                     writer.writerow(header)
 
                 row_data = [epoch + 1, Unified_train_loss.item(), Unified_test_loss.item()] + \
-                        [item for pair in zip(Unified_train_losses.tolist(), Unified_test_losses.tolist()) for item in pair] + \
-                        [formatted_att_index]
+                        [item for pair in zip(Unified_train_losses.tolist(), Unified_test_losses.tolist()) for item in pair] 
                 writer.writerow(row_data)
 
             # Determine whether should trigger early stopping every 200 epochs

@@ -611,44 +611,18 @@ class Mutual_Representation_PreTrain_Net_SingleMerge(nn.Module):
 
         # Up-lifting
         self.net_Y_Gins = nn.ModuleList([PositionNet(layer_size=[ n_base + 1 , 50, 50, n_field_info]) for _ in range(num_fields)])
-        # self.net_Y_Gins = nn.ModuleList([MLP(layer_size=[ n_base + 1 , 60, 60, 60, n_field_info]) for _ in range(num_fields)])
-        # self.net_Y_Gins = nn.ModuleList([MLP_SIG(layer_size=[ n_base + 1 , 100, 100, 100, n_field_info]) for _ in range(num_fields)])
 
-        # Create multiple layers of the transformer for different fields
         self.transformer_layers = nn.ModuleList([
             MultiField_TransformerLayer(n_field_info, num_heads, num_fields, dropout_rate = 0.40) for _ in range(num_layers)
         ])
         # Add a final LayerNorm before taking the mean
         self.final_norm = nn.LayerNorm(n_field_info)
-        #   Use attention-based pooling technique
-        # self.attention_pool = GlobalAttentionPooling(n_field_info)
-        self.attention_pools = nn.ModuleList([
-            GlobalAttentionPooling(n_field_info) for _ in range(num_fields)
-        ])
         
-        #To combine different feature vectors
-        self.UnifyAttention_layers = nn.ModuleList([
-            SelfAttention(n_field_info, num_fields) for _ in range(num_fields)
-        ])
-        
-        # self.FinalMerge = SelfAttention(n_field_info, num_fields, dropout_rate = 0.10) 
-        self.FinalMerge = SelfAttention_Ex0(n_field_info, num_fields, dropout_rate = 0.10)  #   This is for roll-out
+        self.FinalMerge = SelfAttention(n_field_info, num_fields, dropout_rate = 0.10)  #   This is for roll-out
 
         self.MLPs = nn.ModuleList([MLP(layer_size=[n_field_info, 60, n_field_info]) for _ in range(num_fields)])
-
         # Channels to process the field_info for different fields, including temperature field
         self.PosNet = PositionNet(layer_size=[2, 60, 60, 60, n_base])
-        self.PosNets = nn.ModuleDict({
-            'T':   PositionNet([2, 50, 50, 50, n_base]),
-            'P':   PositionNet([2, 50, 50, 50, n_base]),
-            'Vx':  PositionNet([2, 50, 50, 50, n_base]),
-            'Vy':  PositionNet([2, 50, 50, 50, n_base]),
-            'O2':  PositionNet([2, 50, 50, 50, n_base]),
-            'CO2': PositionNet([2, 50, 50, 50, n_base]),
-            'H2O': PositionNet([2, 50, 50, 50, n_base]),
-            'CO':  PositionNet([2, 50, 50, 50, n_base]),
-            'H2':  PositionNet([2, 50, 50, 50, n_base])
-        })
         self.field_nets = nn.ModuleDict({
             'T':   ConditionNet([n_field_info, 50, 50, n_base]),
             'P':   ConditionNet([n_field_info, 50, 50, n_base]),
@@ -664,9 +638,6 @@ class Mutual_Representation_PreTrain_Net_SingleMerge(nn.Module):
     def _compress_data(self, Y, Gin, num_heads): # Y = baseF here
         n_fields = Gin.shape[-1]
 
-        # Concatenate Y with all fields in Gin
-        # Gin_Y = torch.cat((Y, Gin), dim=2)  # [n_batch, n_points, n_encoding + n_fields]
-
         compressed_info_list = []
         for field_idx in range(n_fields):
             
@@ -677,18 +648,6 @@ class Mutual_Representation_PreTrain_Net_SingleMerge(nn.Module):
             
             for layer in self.transformer_layers:
                 field_info = layer(field_info, field_idx, num_heads)
-            # After all transformer layers, perform LayerNorm (if desired)
-            # field_info = self.final_norm(field_info)
-            
-            # # Calculate the mean across the sequence length dimension (dim=1)
-            # compressed_mean = field_info.mean(dim=1)
-            # # Apply max pooling across the dimension of selected points
-            # compressed_max, _ = field_info.max(dim=1)
-            # # compressed_info = torch.cat((compressed_mean, compressed_max), dim=1)
-            # compressed_info = compressed_mean + compressed_max
-
-            #   Use attention-based pooling technique
-            # compressed_info = self.attention_pools[field_idx](field_info)
 
             compressed_info = field_info.mean(dim=1)
             compressed_info_list.append(compressed_info)
@@ -696,58 +655,25 @@ class Mutual_Representation_PreTrain_Net_SingleMerge(nn.Module):
         compressed_info_ALL = torch.stack(compressed_info_list, dim=-1)
         return compressed_info_ALL
 
-    def UnifyAttention(self, field_info):
-        U_sliced_transformed = []
-        
-        for field_idx in range(field_info.shape[-1]):
-            U_Unified = self.UnifyAttention_layers[field_idx](field_info)
-            # U_Unified = self.MLPs[field_idx](U_Unified)           
-            U_sliced_transformed.append(U_Unified)
-        
-        # Stack the transformed slices to form a new tensor
-        U_transformed = torch.stack(U_sliced_transformed, dim=-1)
-        Output = field_info + U_transformed  # Add the residual connection
-        
-        # return U_transformed
-        return Output
-
-    def mlp_transform(self, field_info):
-        # Apply MLP to each slice and store the results in a list
-        U_sliced_transformed = []
-        for field_idx in range(field_info.shape[-1]):
-            U_sliced = field_info[:, :, field_idx]
-            U_sliced_transformed.append( self.MLPs[field_idx](U_sliced) )
-        # Stack the transformed slices to form a new tensor
-        U_transformed = torch.stack(U_sliced_transformed, dim=-1)
-        return U_transformed
-
-    def forward(self, cond, Y, Gin, att_index, num_heads):
+    def forward(self, cond, Y, Gin, num_heads):
         n_batch = cond.shape[0]
         n_fields = Gin.shape[-1]
         baseF = self.PosNet(Y)
 
-        att_index = att_index[0]
-
-        # field_info = self._compress_data(Y, Gin, num_heads)
         field_info = self._compress_data(baseF, Gin, num_heads)
 
-        fields_to_exclude = att_index[-3:].tolist()  # Determine fields to exclude based on performance;
-        # print(f'fields_to_exclude of is', fields_to_exclude)
-
         U = field_info
-        U_Unified = self.FinalMerge(U, fields_to_exclude)
+        U_Unified = self.FinalMerge(U, -1)
 
         Gout_list = []
         for field_idx in range(n_fields + 1): # Includes an extra iteration for the unified feature
             # Determine the input tensor: U_sliced for fields or U_Unified for unified feature
             U_input = U[:, :, field_idx] if field_idx < n_fields else U_Unified
-            # U_input = U_transformed[:, :, field_idx] if field_idx < n_fields else U_Unified
             
             # Compute outputs for each field using the corresponding network
             field_outputs = []
             for field_name, field_net in self.field_nets.items(): # Generate all the fields
                 coef = field_net(U_input)
-                # baseF = self.PosNets[field_name](Y)  # This computes the base functions for the field
                 combine = coef * baseF
                 field_output = torch.sum(combine, dim=2, keepdim=True)
                 field_outputs.append(field_output)

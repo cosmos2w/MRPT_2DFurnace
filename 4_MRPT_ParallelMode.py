@@ -20,23 +20,23 @@ from network import Self_Representation_PreTrain_Net
 device_ids = [0, 1, 2]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
-WRITE_FEATURE = False #Determine whether feature vectors should be documented
 N_EPOCH = 2000000
 Case_Num = 300
+N_P_Selected = 600
 n_field_info = 36
-n_baseF = 40 #基函数数量
+n_baseF = 40 
 n_cond = 11 #Length of the condition vector in U
-
-field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-excluded_field = 'NONE' # Define the field that will not be trained in this stage / Set 'NONE' if don't want to exclude a field
+Unified_Weight = 5.0 # Contribution of the unified feature
 
 #Transformer layer parameters
 num_heads = 9
 num_layers = 1
-NET_SETTINGS = 'N_P_Selected=600\tn_field_info = 36\tUnified_Weight = 5.0\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[1+n_base, 60, 60, n_field_info]\tConNets=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
 
+field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
+excluded_field = 'NONE' # Define the field that will not be trained in this stage / Set 'NONE' if don't want to exclude a field
 NET_NAME = 'SRPT_Standard'
-Unified_Weight = 5.0 # Contribution of the unified feature
+
+NET_SETTINGS = f'N_P_Selected={N_P_Selected}\tn_field_info = {n_field_info}\tUnified_Weight = {Unified_Weight}\tMultiHeadAttention=9 & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[1+n_base, 60, 60, n_field_info]\tConNets=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
 
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -51,7 +51,7 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N_P_Selected = 600, batch_size = 360): # random sampling in each epoch
+def get_data_iter(U, Y, G, N_P_Selected, batch_size = 360): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
@@ -113,11 +113,10 @@ if __name__ == '__main__':
             field_weights = torch.tensor([1.0] * len(field_names))
 
         field_weights = field_weights.to(device)
-        # print('G_train.shape is ', G_train.shape)
 
     num_fields = len(field_names) 
     net = Self_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields).to(device)
-    # Wrap the model with DataParallel
+
     net = nn.DataParallel(net, device_ids=device_ids)
     net.apply(weights_init)
 
@@ -126,7 +125,7 @@ if __name__ == '__main__':
 
     # Set up early stopping parameters
     patience = 500
-    best_combined_loss = float('50.0') #Initial threshold to determine early stopping
+    best_combined_loss = float('5.0') #Initial threshold to determine early stopping
     counter = 0
     train_loss_weight = 0.15
     test_loss_weight = 0.85
@@ -149,14 +148,10 @@ if __name__ == '__main__':
         for U, Y, G in get_data_iter(U_train, Y_train, G_train):
             
             optimizer.zero_grad()
-            # output = net(U, Y, G, num_heads)
             loss = 0
-            # output, output_Unified = net(U, Y, G, num_heads)
             output_list = net(U, Y, G, num_heads)
             output_stacked = torch.stack(output_list, dim=0)
-            # print('output_stacked.shape is ', output_stacked.shape)
             output = output_stacked[0, :, :, :]
-            # print('output.shape is ', output.shape)
             output_Unified = output_stacked[1, :, :, :]
             
             loss_data, losses = custom_mse_loss(output, G)

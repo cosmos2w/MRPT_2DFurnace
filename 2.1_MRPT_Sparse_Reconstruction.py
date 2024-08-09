@@ -21,7 +21,7 @@ from constant import DataSplit
 from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference
 
 # Specify the GPUs to use
-device_ids = [1]
+device_ids = [2]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
@@ -32,7 +32,7 @@ Case_Num = 300
 
 EVALUATE = True
 INDICE_RENEW = False
-ADD_NOISE = True
+ADD_NOISE = False
 mu = 0
 sigma = 0.03
 
@@ -55,7 +55,7 @@ Unifed_weight = 5.0
 NET_TYPE = int(1) 
                 # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
 NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\tADD_NOISE is {ADD_NOISE}\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_N{N_selected}_Noise5', f'Direct_SensorToFeature_N{N_selected}_Noise3']
+NET_NAME = [f'MRPT_SensorToFeature_N{N_selected}_Noise5', f'Direct_SensorToFeature_N{N_selected}']
 
 PreTrained_Net_Name = 'net_MRPT_Standard_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
