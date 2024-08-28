@@ -31,7 +31,7 @@ num_layers = 1
 PreTrained_Net_Name = 'net_MRPT_Standard_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
 
-outFile = f'data_split/data_split_MRPT_Features_{Case_Num}.pic'
+outFile = f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}.pic'
 
 def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360): # random sampling in each epoch
     num_examples = len(U)

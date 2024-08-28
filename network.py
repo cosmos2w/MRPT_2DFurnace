@@ -357,43 +357,10 @@ class SelfAttention_EX(nn.Module):  #   Will exclude certain fields upon unifica
         return output
 
 class MLP(nn.Module):
-    # def __init__(self, input_dim, hidden_dim, output_dim):
-    #     super(MLP, self).__init__()
-    #     self.fc1 = nn.Linear(input_dim, hidden_dim)
-    #     self.fc2 = nn.Linear(hidden_dim, output_dim)
-    #     self.dropout = nn.Dropout(0.1)
-    #     self.activation = nn.ReLU()
-
-    # def forward(self, x):
-    #     x = self.fc1(x)
-    #     x = self.activation(x)
-    #     # x = self.dropout(x)
-    #     x = self.fc2(x)
-    #     return x
-    # def __init__(self, layer_size, activation=True):
-    #     super(MLP, self).__init__()
-    #     self.activation = activation
-    #     self.layers = nn.ModuleList() # 用于存储所有的层
-    #     for i in range(len(layer_size) - 1):
-    #         # 添加一个线性层
-    #         self.layers.append(nn.Linear(layer_size[i], layer_size[i + 1], bias=True))
-
-    # def forward(self, x):
-    #     for i, layer in enumerate(self.layers):
-    #         x = layer(x)
-    #         if i < len(self.layers) - 1:
-    #             if self.activation:
-    #                 # x = torch.tanh(x)
-    #                 x = torch.relu(x)
-
-    #     # if self.activation:
-    #     #     x = torch.sigmoid(x)
-    #     return x
     def __init__(self, layer_size):
         super(MLP, self).__init__()
-        self.layers = nn.ModuleList() # 用于存储所有的层
+        self.layers = nn.ModuleList() 
         for i in range(len(layer_size) - 1):
-            # 添加一个线性层
             self.layers.append(nn.Linear(layer_size[i], layer_size[i + 1], bias=True))
         
         self.dropout = nn.Dropout(0.1)
@@ -411,9 +378,8 @@ class MLP(nn.Module):
 class MLP_SIG(nn.Module):
     def __init__(self, layer_size):
         super(MLP_SIG, self).__init__()
-        self.layers = nn.ModuleList() # 用于存储所有的层
+        self.layers = nn.ModuleList() 
         for i in range(len(layer_size) - 1):
-            # 添加一个线性层
             self.layers.append(nn.Linear(layer_size[i], layer_size[i + 1], bias=True))
         
         self.dropout = nn.Dropout(0.1)
@@ -1006,7 +972,7 @@ class Mutual_SensorToFeature_InterInference_LoadFeature(nn.Module):
             PreTrained_net = PreTrained_net.module
 
         self.MLPs = nn.ModuleList([MLP(layer_sizes) for _ in range(num_fields)]) 
-        self.MLP_Final = MLP([36, 300, 300, 36])
+        self.MLP_Final = MLP([36, 500, 500, 36])
 
         self.PreTrained_net = PreTrained_net
         self.net_Y_Gins = PreTrained_net.net_Y_Gins
@@ -1074,7 +1040,6 @@ class Mutual_SensorToFeature_InterInference_LoadFeature(nn.Module):
         # U_Unified = Norm_Global_Unified_U
     
         return Predicted_Features, U_Unified
-
 
 # Perform parameter inversion task: Using F2F inter-inference to recover the unified latent feature from single-field sparse measurements
 class New_Mutual_SensorToParameter(nn.Module):

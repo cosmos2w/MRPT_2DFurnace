@@ -10,6 +10,7 @@ sys.path.append('..')
 
 import io
 import csv
+import time
 import numpy as np 
 
 import torch
@@ -43,7 +44,7 @@ N_P_Selected = 2000 # points to evaluate performances
 #Transformer layer parameters
 num_heads    = 9
 num_layers   = 1
-hidden_sizes = [300, 300]
+hidden_sizes = [500, 500]
 
 Unifed_weight = 5.0
 
@@ -149,7 +150,7 @@ if __name__ == '__main__':
     field_info_train_tensors = {}
     field_info_test_tensors = {}
     # Load the dataset of all fields & Randomly pick-out sensor points for the selected Field_idx
-    with open('data_split/data_split_MRPT_Features_{}.pic'.format(Case_Num), 'rb') as fp: 
+    with open(f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train          = data_split.U_train.to(device)
@@ -243,10 +244,10 @@ if __name__ == '__main__':
 
     # Wrap the model with DataParallel
     net = nn.DataParallel(net, device_ids=device_ids)
-    optimizer = optim.Adam(net.parameters(), lr=0.001) # , weight_decay=5.0E-5
+    optimizer = optim.Adam(net.parameters(), lr=0.0005) # , weight_decay=5.0E-5
 
     # Set up early stopping parameters
-    patience = 50
+    patience = 100
     best_combined_loss = float('5.0') #Initial threshold to determine early stopping
     counter = 0
     train_loss_weight = 0.15
@@ -270,6 +271,8 @@ if __name__ == '__main__':
 
         train_batch_count = 0
         test_batch_count  = 0
+
+        start_time = time.time()  # Start time measurement
 
         for U, Y, G, Yin, Gin in get_data_iter(U_train, Y_train, G_train, Yin_train, Gin_train):
             loss = 0.0
@@ -377,11 +380,23 @@ if __name__ == '__main__':
         Total_Field_test_loss_Data /= test_batch_count
         Field_test_loss /= test_batch_count
 
-        # combined_loss = train_loss_weight*train_loss + test_loss_weight*test_loss
-        combined_loss = train_loss_weight*mse_loss_Unifed_train + test_loss_weight*mse_loss_Unifed_test
+        if EVALUATE is False:
+            combined_loss = train_loss_weight*mse_loss_Unifed_train + test_loss_weight*mse_loss_Unifed_test
+        elif EVALUATE is True:
+            combined_loss = train_loss_weight*Total_Field_train_loss_Data + test_loss_weight*Total_Field_test_loss_Data
+        else:
+            print(f'EVALUATE is {EVALUATE}, not correctly defined!!!')
+            exit(0)
+
+        end_time = time.time()  # End time measurement
+        epoch_duration = end_time - start_time  # Calculate duration
 
         # Print and write to CSV 
         if (epoch + 1) % N_REPORT == 0:
+
+            print(f'Epoch {epoch+1}/{N_EPOCH}, Duration: {epoch_duration:.4f} seconds')
+            print()
+
             print(f'Epoch {epoch+1}/{N_EPOCH}, for feature retrieving, Train Loss: {train_loss.item()}, Test Loss: {test_loss.item()}')
             for id in range( len(field_names) ):
                 print(f'Train Loss for field {field_names[id]}: {train_losses[id].item()}, Test Loss for field {field_names[id]}: {test_losses[id].item()}')
@@ -396,7 +411,7 @@ if __name__ == '__main__':
 
                 with open(f'Loss_csv/train_test_loss_reconstruction/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'at', newline='') as fp:
                     writer = csv.writer(fp, delimiter='\t')
-                    if ((epoch + 1) // 10 == 1):
+                    if ((epoch + 1) // N_REPORT == 1):
                         header = ['Epoch', 'Overall_Train_Loss', 'Overall_Test_Loss']
                         interleaved_field_names = [fn for field_name in field_names for fn in (f'Train_{field_name}_loss', f'Test_{field_name}_loss')]
                         header.extend(interleaved_field_names)
