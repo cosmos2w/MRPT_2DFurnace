@@ -21,7 +21,7 @@ from constant import DataSplit
 from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference
 
 # Specify the GPUs to use
-device_ids = [2]
+device_ids = [0]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
@@ -31,7 +31,7 @@ N_EPOCH = 1000000
 Case_Num = 300
 
 EVALUATE = True
-INDICE_RENEW = False
+INDICE_RENEW = True
 ADD_NOISE = False
 mu = 0
 sigma = 0.03
@@ -52,10 +52,10 @@ min_val = -3.0
 max_val = 3.0
 Unifed_weight = 5.0
 
-NET_TYPE = int(1) 
+NET_TYPE = int(0) 
                 # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
 NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\tADD_NOISE is {ADD_NOISE}\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_N{N_selected}_Noise5', f'Direct_SensorToFeature_N{N_selected}']
+NET_NAME = [f'MRPT_SensorToFeature_N{N_selected}', f'Direct_SensorToFeature_N{N_selected}']
 
 PreTrained_Net_Name = 'net_MRPT_Standard_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
@@ -238,7 +238,7 @@ if __name__ == '__main__':
         test_batch_count = 0
 
         for U, Y, G, Yin, Gin in get_data_iter(U_train, Y_train, G_train, Yin_train, Gin_train):
-            # 梯度清零
+            
             loss = 0
             optimizer.zero_grad()
             # print('Out there, Yin.shape is', Yin.shape)

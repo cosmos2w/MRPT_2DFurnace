@@ -51,7 +51,7 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N_P_Selected, batch_size = 360): # random sampling in each epoch
+def get_data_iter(U, Y, G, N_P_Selected = N_P_Selected, batch_size = 360): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
@@ -225,7 +225,7 @@ if __name__ == '__main__':
             for field_idx in range(len(field_names) + 1):
                 # Determine field name or unified feature
                 field_name_or_feature = 'Unified_feature' if field_idx == len(field_names) else field_names[field_idx]
-                with open(f'Loss_csv_PreTraining/train_test_loss_Mutual/train_test_loss_MultiField_{NET_NAME}_{field_name_or_feature}.csv', 'at', newline='') as fp:
+                with open(f'Loss_csv/train_test_loss_Mutual/train_test_loss_MultiField_{NET_NAME}_{field_name_or_feature}.csv', 'at', newline='') as fp:
                     writer = csv.writer(fp, delimiter='\t')
                     if ((epoch + 1) // 20 == 1):
                         fp.write(NET_SETTINGS)
