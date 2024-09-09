@@ -14,29 +14,29 @@ import pickle
 
 from torch import nn 
 from constant import DataSplit 
-from network import Self_Representation_PreTrain_Net
+from network import MRPT_PreTrain_Net_ParallelMode
 
 # Specify the GPUs to use
-device_ids = [0, 1, 2]
+device_ids = [0, 1]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 N_EPOCH = 2000000
 Case_Num = 300
-N_P_Selected = 600
+N_P_Selected = 200
 n_field_info = 36
 n_baseF = 40 
 n_cond = 11 #Length of the condition vector in U
 Unified_Weight = 5.0 # Contribution of the unified feature
 
 #Transformer layer parameters
-num_heads = 9
+num_heads = 6
 num_layers = 1
 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 excluded_field = 'NONE' # Define the field that will not be trained in this stage / Set 'NONE' if don't want to exclude a field
-NET_NAME = 'SRPT_Standard'
+NET_NAME = f'SRPT_Standard_{N_P_Selected}'
 
-NET_SETTINGS = f'N_P_Selected={N_P_Selected}\tn_field_info = {n_field_info}\tUnified_Weight = {Unified_Weight}\tMultiHeadAttention=9 & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[1+n_base, 60, 60, n_field_info]\tConNets=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
+NET_SETTINGS = f'Attention Layer in Encoder is skipped\tN_P_Selected={N_P_Selected}\tn_field_info = {n_field_info}\tUnified_Weight = {Unified_Weight}\tMultiHeadAttention={num_heads} & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[1+n_base, 60, 60, n_field_info]\tConNets=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
 
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -51,7 +51,7 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N_P_Selected, batch_size = 360): # random sampling in each epoch
+def get_data_iter(U, Y, G, N, batch_size = 180): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
@@ -60,7 +60,7 @@ def get_data_iter(U, Y, G, N_P_Selected, batch_size = 360): # random sampling in
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) # 最后一次可能不足一个batch
         j = j.to(device)
 
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
+        selected_points = torch.randperm(num_points)[:N].to(device)
         yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points)
 
 def custom_mse_loss(output, target):
@@ -115,7 +115,7 @@ if __name__ == '__main__':
         field_weights = field_weights.to(device)
 
     num_fields = len(field_names) 
-    net = Self_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields).to(device)
+    net = MRPT_PreTrain_Net_ParallelMode(n_field_info, n_baseF, num_heads, num_layers, num_fields).to(device)
 
     net = nn.DataParallel(net, device_ids=device_ids)
     net.apply(weights_init)
@@ -145,7 +145,7 @@ if __name__ == '__main__':
         train_batch_count = 0
         test_batch_count = 0
 
-        for U, Y, G in get_data_iter(U_train, Y_train, G_train):
+        for U, Y, G in get_data_iter(U_train, Y_train, G_train, N = N_P_Selected):
             
             optimizer.zero_grad()
             loss = 0
@@ -181,7 +181,7 @@ if __name__ == '__main__':
         if (epoch + 1) % 20 == 0:
 
             with torch.no_grad():  # Make sure to use no_grad for evaluation in test phase
-                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N_P_Selected = 2000):
+                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N = 2000):
                     output_list = net(U, Y, G, num_heads)
                     output_stacked = torch.stack(output_list, dim=0)
                     output = output_stacked[0, :, :, :]

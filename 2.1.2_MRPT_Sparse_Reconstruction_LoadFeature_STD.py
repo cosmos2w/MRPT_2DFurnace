@@ -19,11 +19,11 @@ import torch.optim as optim
 import pickle
 
 from torch import nn 
-from constant import DataSplit 
-from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference, Mutual_SensorToFeature_InterInference_LoadFeature
+from constant import DataSplit_STD 
+from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference, Mutual_SensorToFeature_InterInference_LoadFeature_STD
 
 # Specify the GPUs to use
-device_ids = [1]
+device_ids = [2]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
@@ -39,12 +39,13 @@ n_baseF      = 40
 n_cond       = 11 #Length of the condition vector in U
 
 field_idx    = 0 # The field used for sparse reconstruction
-N_selected   = 50 # Points selected for sparse reconstruction
+N_selected   = 25 # Points selected for sparse reconstruction
 N_P_Selected = 2000 # points to evaluate performances
 #Transformer layer parameters
-num_heads    = 9
+num_heads    = 6
 num_layers   = 1
-hidden_sizes = [1000, 1000]
+
+hidden_sizes = [300, 300]
 layer_sizes = [n_field_info * len(field_names)] + hidden_sizes + [n_field_info]  
 Final_layer_sizes = [n_field_info] + hidden_sizes + [n_field_info] 
 
@@ -53,9 +54,9 @@ Unifed_weight = 5.0
 NET_TYPE = int(0) 
                 # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
 NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_N{N_selected}_LoadFeature', f'Direct_SensorToFeature_N{N_selected}']
+NET_NAME = [f'MRPT_SensorToFeature_FromF{field_idx}_N{N_selected}_LoadFeature_STD', f'Direct_SensorToFeature_N{N_selected}_STD']
 
-PreTrained_Net_Name = 'net_MRPT_Standard_state_dict'
+PreTrained_Net_Name = 'net_MRPT_Standard_200_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
 
 def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360): # random sampling in each epoch
@@ -86,18 +87,16 @@ def custom_mse_loss(output, target, field_weights):
 
     return total_loss, field_losses
 
-def normalize_data(data, min_val, max_val):
-    # Normalize data to [0, 1]
-    normalized_data = (data - min_val) / (max_val - min_val)
-    # Take the square root of the normalized data
-    sqrt_normalized_data = torch.sqrt(normalized_data)
-    return sqrt_normalized_data
+def standardize_features(latent_vectors, mean, std):    
+    epsilon = 1e-8
+    std = torch.clamp(std, min=epsilon)
+    
+    standardized_vectors = (latent_vectors - mean) / std
+    
+    return standardized_vectors, mean, std
 
-def Denormalize_data(normalized_data, min_val, max_val):
-
-    Retrieved_data = normalized_data ** 2
-    Retrieved_data = Retrieved_data * (max_val - min_val) + min_val
-    return Retrieved_data
+def unstandardize_features(standardized_vectors, mean, std):
+    return standardized_vectors * std + mean
 
 if __name__ == '__main__':
 
@@ -107,52 +106,22 @@ if __name__ == '__main__':
     if EVALUATE is True:
         with open(f'Loss_csv/train_test_loss_reconstruction/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
             pass
-    #     with open(f'LatentRepresentation/predictions_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
-    #         pass
+        with open(f'LatentRepresentation/predictions_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
+            pass
 
     # Load the pretrained net
     PreTrained_net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     state_dict = torch.load(Load_file_path)
     PreTrained_net.load_state_dict(state_dict)
 
-    #   Extract all the min and max values in latent features for nor- and denormalization
-    Max_Value_Train_list = []
-    Min_Value_Train_list = []
-    Max_Value_Test_list = []
-    Min_Value_Test_list = []
-    for id in range(len(field_names) + 1):
-        field_name_or_feature = 'Unified' if id == len(field_names) else field_names[id]
-        file_path = f'LatentRepresentation/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv'
-        
-        # Open the CSV file for reading
-        try:
-            with open(file_path, 'rt') as fp:
-                reader = csv.reader(fp)
-                next(reader)  # Skip the first row (header)
-                second_row = next(reader)  # Read the second row
-                
-                # Append each value from the second row to the respective list
-                Max_Value_Train_list.append(float(second_row[0]))
-                Min_Value_Train_list.append(float(second_row[1]))
-                Max_Value_Test_list.append(float(second_row[2]))
-                Min_Value_Test_list.append(float(second_row[3]))
-        except Exception as e:
-            print(f"Failed to process {file_path}: {str(e)}")
-    # Convert lists to tensors
-    Max_Value_Train = torch.tensor(Max_Value_Train_list)
-    Min_Value_Train = torch.tensor(Min_Value_Train_list)
-    Max_Value_Test = torch.tensor(Max_Value_Test_list)
-    Min_Value_Test = torch.tensor(Min_Value_Test_list)
-
-    print(f"Max_Value_Train: {Max_Value_Train}")
-    print(f"Min_Value_Train: {Min_Value_Train}")
-    print(f"Max_Value_Test: {Max_Value_Test}")
-    print(f"Min_Value_Test: {Min_Value_Test}")
-
     field_info_train_tensors = {}
     field_info_test_tensors = {}
-    # Load the dataset of all fields & Randomly pick-out sensor points for the selected Field_idx
-    with open(f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}.pic', 'rb') as fp: 
+    mean_train_tensors = {}
+    mean_test_tensors = {}
+    std_train_tensors = {}
+    std_test_tensors = {}
+
+    with open(f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train          = data_split.U_train.to(device)
@@ -164,32 +133,72 @@ if __name__ == '__main__':
 
         LR_T_train  	 = data_split.LR_T_train.to(device)
         field_info_train_tensors[f'field_info_T'] = LR_T_train
+        MEAN_T_train                              = data_split.MEAN_T_train.to(device)
+        mean_train_tensors[f'field_info_T']       = MEAN_T_train
+        STD_T_train                               = data_split.STD_T_train.to(device)
+        std_train_tensors[f'field_info_T']        = STD_T_train
 
         LR_P_train  	 = data_split.LR_P_train.to(device)
-        field_info_train_tensors[f'field_info_P'] = LR_P_train
+        field_info_train_tensors[f'field_info_P']   = LR_P_train
+        MEAN_P_train                                = data_split.MEAN_P_train.to(device)
+        mean_train_tensors[f'field_info_P']         = MEAN_P_train
+        STD_P_train                                 = data_split.STD_P_train.to(device)
+        std_train_tensors[f'field_info_P']          = STD_P_train
 
         LR_Vx_train  	 = data_split.LR_Vx_train.to(device)
-        field_info_train_tensors[f'field_info_Vx'] = LR_Vx_train
+        field_info_train_tensors[f'field_info_Vx']  = LR_Vx_train
+        MEAN_Vx_train                               = data_split.MEAN_Vx_train.to(device)
+        mean_train_tensors[f'field_info_Vx']        = MEAN_Vx_train
+        STD_Vx_train                                = data_split.STD_Vx_train.to(device)
+        std_train_tensors[f'field_info_Vx']         = STD_Vx_train
 
         LR_Vy_train  	 = data_split.LR_Vy_train.to(device)
-        field_info_train_tensors[f'field_info_Vy'] = LR_Vy_train
+        field_info_train_tensors[f'field_info_Vy']  = LR_Vy_train
+        MEAN_Vy_train                               = data_split.MEAN_Vy_train.to(device)
+        mean_train_tensors[f'field_info_Vy']        = MEAN_Vy_train
+        STD_Vy_train                                = data_split.STD_Vy_train.to(device)
+        std_train_tensors[f'field_info_Vy']         = STD_Vy_train
 
-        LR_O2_train  	 = data_split.LR_O2_train.to(device)  	
-        field_info_train_tensors[f'field_info_O2'] = LR_O2_train
+        LR_O2_train  	 = data_split.LR_O2_train.to(device)
+        field_info_train_tensors[f'field_info_O2']  = LR_O2_train
+        MEAN_O2_train                               = data_split.MEAN_O2_train.to(device)
+        mean_train_tensors[f'field_info_O2']        = MEAN_O2_train
+        STD_O2_train                                = data_split.STD_O2_train.to(device)
+        std_train_tensors[f'field_info_O2']         = STD_O2_train
 
-        LR_CO2_train  	 = data_split.LR_CO2_train.to(device)  	
-        field_info_train_tensors[f'field_info_CO2'] = LR_CO2_train
+        LR_CO2_train  	 = data_split.LR_CO2_train.to(device)
+        field_info_train_tensors[f'field_info_CO2']  = LR_CO2_train
+        MEAN_CO2_train                               = data_split.MEAN_CO2_train.to(device)
+        mean_train_tensors[f'field_info_CO2']        = MEAN_CO2_train
+        STD_CO2_train                                = data_split.STD_CO2_train.to(device)
+        std_train_tensors[f'field_info_CO2']         = STD_CO2_train
 
-        LR_H2O_train  	 = data_split.LR_H2O_train.to(device)  	
-        field_info_train_tensors[f'field_info_H2O'] = LR_H2O_train
+        LR_H2O_train  	 = data_split.LR_H2O_train.to(device)
+        field_info_train_tensors[f'field_info_H2O']  = LR_H2O_train
+        MEAN_H2O_train                               = data_split.MEAN_H2O_train.to(device)
+        mean_train_tensors[f'field_info_H2O']        = MEAN_H2O_train
+        STD_H2O_train                                = data_split.STD_H2O_train.to(device)
+        std_train_tensors[f'field_info_H2O']         = STD_H2O_train
 
-        LR_CO_train		 = data_split.LR_CO_train.to(device)	
-        field_info_train_tensors[f'field_info_CO'] = LR_CO_train
+        LR_CO_train  	 = data_split.LR_CO_train.to(device)
+        field_info_train_tensors[f'field_info_CO']  = LR_CO_train
+        MEAN_CO_train                               = data_split.MEAN_CO_train.to(device)
+        mean_train_tensors[f'field_info_CO']        = MEAN_CO_train
+        STD_CO_train                                = data_split.STD_CO_train.to(device)
+        std_train_tensors[f'field_info_CO']         = STD_CO_train
 
-        LR_H2_train		 = data_split.LR_H2_train.to(device)	
-        field_info_train_tensors[f'field_info_H2'] = LR_H2_train
+        LR_H2_train  	 = data_split.LR_H2_train.to(device)
+        field_info_train_tensors[f'field_info_H2']  = LR_H2_train
+        MEAN_H2_train                               = data_split.MEAN_H2_train.to(device)
+        mean_train_tensors[f'field_info_H2']        = MEAN_H2_train
+        STD_H2_train                                = data_split.STD_H2_train.to(device)
+        std_train_tensors[f'field_info_H2']         = STD_H2_train
 
         LR_Unified_train = data_split.LR_Unified_train.to(device)
+        MEAN_Unified_train                             = data_split.MEAN_Unified_train.to(device)
+        mean_train_tensors[f'Unified']                  = MEAN_Unified_train
+        STD_Unified_train                              = data_split.STD_Unified_train.to(device)
+        std_train_tensors[f'Unified']                   = STD_Unified_train
 
         U_test           = data_split.U_test.to(device)
         Y_test           = data_split.Y_test.to(device)
@@ -198,41 +207,87 @@ if __name__ == '__main__':
         Gin_test  		 = data_split.Gin_test.to(device)  		
         Yin_test   	 	 = data_split.Yin_test.to(device)  
 
-        LR_T_test  	 	 = data_split.LR_T_test.to(device)
+        LR_T_test  	 = data_split.LR_T_test.to(device)
         field_info_test_tensors[f'field_info_T'] = LR_T_test
+        MEAN_T_test                              = data_split.MEAN_T_test.to(device)
+        mean_test_tensors[f'field_info_T']       = MEAN_T_test
+        STD_T_test                               = data_split.STD_T_test.to(device)
+        std_test_tensors[f'field_info_T']        = STD_T_test
 
-        LR_P_test  	 	 = data_split.LR_P_test.to(device)
-        field_info_test_tensors[f'field_info_P'] = LR_P_test
+        LR_P_test  	 = data_split.LR_P_test.to(device)
+        field_info_test_tensors[f'field_info_P']   = LR_P_test
+        MEAN_P_test                                = data_split.MEAN_P_test.to(device)
+        mean_test_tensors[f'field_info_P']         = MEAN_P_test
+        STD_P_test                                 = data_split.STD_P_test.to(device)
+        std_test_tensors[f'field_info_P']          = STD_P_test
 
-        LR_Vx_test  	 = data_split.LR_Vx_test.to(device) 
-        field_info_test_tensors[f'field_info_Vx'] = LR_Vx_test
+        LR_Vx_test  	 = data_split.LR_Vx_test.to(device)
+        field_info_test_tensors[f'field_info_Vx']  = LR_Vx_test
+        MEAN_Vx_test                               = data_split.MEAN_Vx_test.to(device)
+        mean_test_tensors[f'field_info_Vx']        = MEAN_Vx_test
+        STD_Vx_test                                = data_split.STD_Vx_test.to(device)
+        std_test_tensors[f'field_info_Vx']         = STD_Vx_test
 
-        LR_Vy_test  	 = data_split.LR_Vy_test.to(device)  	
-        field_info_test_tensors[f'field_info_Vy'] = LR_Vy_test
+        LR_Vy_test  	 = data_split.LR_Vy_test.to(device)
+        field_info_test_tensors[f'field_info_Vy']  = LR_Vy_test
+        MEAN_Vy_test                               = data_split.MEAN_Vy_test.to(device)
+        mean_test_tensors[f'field_info_Vy']        = MEAN_Vy_test
+        STD_Vy_test                                = data_split.STD_Vy_test.to(device)
+        std_test_tensors[f'field_info_Vy']         = STD_Vy_test
 
-        LR_O2_test  	 = data_split.LR_O2_test.to(device)	
-        field_info_test_tensors[f'field_info_O2'] = LR_O2_test
+        LR_O2_test  	 = data_split.LR_O2_test.to(device)
+        field_info_test_tensors[f'field_info_O2']  = LR_O2_test
+        MEAN_O2_test                               = data_split.MEAN_O2_test.to(device)
+        mean_test_tensors[f'field_info_O2']        = MEAN_O2_test
+        STD_O2_test                                = data_split.STD_O2_test.to(device)
+        std_test_tensors[f'field_info_O2']         = STD_O2_test
 
-        LR_CO2_test  	 = data_split.LR_CO2_test.to(device)	
-        field_info_test_tensors[f'field_info_CO2'] = LR_CO2_test
+        LR_CO2_test  	 = data_split.LR_CO2_test.to(device)
+        field_info_test_tensors[f'field_info_CO2']  = LR_CO2_test
+        MEAN_CO2_test                               = data_split.MEAN_CO2_test.to(device)
+        mean_test_tensors[f'field_info_CO2']        = MEAN_CO2_test
+        STD_CO2_test                                = data_split.STD_CO2_test.to(device)
+        std_test_tensors[f'field_info_CO2']         = STD_CO2_test
 
         LR_H2O_test  	 = data_split.LR_H2O_test.to(device)
-        field_info_test_tensors[f'field_info_H2O'] = LR_H2O_test
+        field_info_test_tensors[f'field_info_H2O']  = LR_H2O_test
+        MEAN_H2O_test                               = data_split.MEAN_H2O_test.to(device)
+        mean_test_tensors[f'field_info_H2O']        = MEAN_H2O_test
+        STD_H2O_test                                = data_split.STD_H2O_test.to(device)
+        std_test_tensors[f'field_info_H2O']         = STD_H2O_test
 
-        LR_CO_test		 = data_split.LR_CO_test.to(device)
-        field_info_test_tensors[f'field_info_CO'] = LR_CO_test
+        LR_CO_test  	 = data_split.LR_CO_test.to(device)
+        field_info_test_tensors[f'field_info_CO']  = LR_CO_test
+        MEAN_CO_test                               = data_split.MEAN_CO_test.to(device)
+        mean_test_tensors[f'field_info_CO']        = MEAN_CO_test
+        STD_CO_test                                = data_split.STD_CO_test.to(device)
+        std_test_tensors[f'field_info_CO']         = STD_CO_test
 
-        LR_H2_test		 = data_split.LR_H2_test.to(device)
-        field_info_test_tensors[f'field_info_H2'] = LR_H2_test
+        LR_H2_test  	 = data_split.LR_H2_test.to(device)
+        field_info_test_tensors[f'field_info_H2']  = LR_H2_test
+        MEAN_H2_test                               = data_split.MEAN_H2_test.to(device)
+        mean_test_tensors[f'field_info_H2']        = MEAN_H2_test
+        STD_H2_test                                = data_split.STD_H2_test.to(device)
+        std_test_tensors[f'field_info_H2']         = STD_H2_test
 
         LR_Unified_test  = data_split.LR_Unified_test.to(device)
+        MEAN_Unified_test                             = data_split.MEAN_Unified_test.to(device)
+        mean_test_tensors[f'Unified']                  = MEAN_Unified_test        
+        STD_Unified_test                              = data_split.STD_Unified_test.to(device)
+        std_test_tensors[f'Unified']                   = STD_Unified_test
 
         n_inputF = U_train.shape[-1]
         n_pointD = Y_train.shape[-1]
 
+        print('LR_Unified_train.shape is ', LR_Unified_train.shape)
+        print('MEAN_Unified_train.shape is ', MEAN_Unified_train.shape)
+        print('STD_Unified_train.shape is ', STD_Unified_train.shape)
+        # print('LR_Unified_train is: ', LR_Unified_train)
+        # exit()
+
     # Define the network
     if (NET_TYPE == 0):
-        net = Mutual_SensorToFeature_InterInference_LoadFeature(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
+        net = Mutual_SensorToFeature_InterInference_LoadFeature_STD(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
         # Fix the parameters in the petrained net
         for param in net.PreTrained_net.parameters():
             param.requires_grad = False
@@ -245,7 +300,7 @@ if __name__ == '__main__':
 
     # Wrap the model with DataParallel
     net = nn.DataParallel(net, device_ids=device_ids)
-    optimizer = optim.Adam(net.parameters(), lr=0.0002, weight_decay=1.0E-5) # , weight_decay=5.0E-5
+    optimizer = optim.Adam(net.parameters(), lr=0.0005, weight_decay=1.0E-4) # , weight_decay=5.0E-5
 
     # Set up early stopping parameters
     patience = 100
@@ -267,9 +322,8 @@ if __name__ == '__main__':
 
         Total_Field_train_loss_Data = 0.0
         Total_Field_test_loss_Data  = 0.0
-        Field_train_loss = torch.zeros(len(field_names), device=device)  # [len(field_names), len(field_names)]
-        Field_test_loss  = torch.zeros(len(field_names), device=device)  # [len(field_names), len(field_names)]
-
+        Field_train_loss = torch.zeros(len(field_names), device=device)  
+        Field_test_loss  = torch.zeros(len(field_names), device=device)  
         train_batch_count = 0
         test_batch_count  = 0
 
@@ -283,21 +337,22 @@ if __name__ == '__main__':
             # Entering the training phase:
             #----------------------------
             if (NET_TYPE == 0):
-                Predicted_Features, Unified_Feature_output_train = net(Yin, Gin, num_heads, Min_Value_Train, Max_Value_Train)
+                Predicted_Features, Unified_Feature_output_train = net(Yin, Gin, num_heads, mean_train_tensors, std_train_tensors)
             elif (NET_TYPE == 1):
-                Unified_Feature_output_train = net(Yin, Gin,)
+                Unified_Feature_output_train = net(Yin, Gin)
             else:
                 print('Net is not correctly defined !!!')
                 exit()
 
-            for id in range( len(field_names) ):
-                field_output = Predicted_Features[:, :, id]
-                field_target = field_info_train_tensors[f'field_info_{field_names[id]}']
-                field_loss = criterion(field_output, field_target)
-                train_losses[id] = field_loss.item()
-                
-                train_loss += field_loss
-                loss += field_weights[id] * field_loss
+            if (NET_TYPE == 0): # This is only calculated when the Encoder is reused in fine-tuning stage
+                for id in range( len(field_names) ):
+                    field_output = Predicted_Features[:, :, id]
+                    field_target = field_info_train_tensors[f'field_info_{field_names[id]}']
+                    field_loss = criterion(field_output, field_target) 
+                    train_losses[id] = field_loss.item()
+                    
+                    train_loss += field_loss
+                    loss += field_weights[id] * field_loss
 
             mse_loss_Unifed_train = criterion(Unified_Feature_output_train, LR_Unified_train)
 
@@ -312,16 +367,17 @@ if __name__ == '__main__':
                 with torch.no_grad():
                     # Evaluate the field-reconstruction performance in the training set
                     baseF = PreTrained_net.PosNet(Y)
-                    DeNormalized_train_output = Denormalize_data(Unified_Feature_output_train, Min_Value_Train[len(field_names)], Max_Value_Train[len(field_names)]) # This is the recovered "Global_Unified_U"
-                    # DeNormalized_train_output = Denormalize_data(LR_Unified_train, Min_Value_Train[len(field_names)], Max_Value_Train[len(field_names)]) # This is the recovered "Global_Unified_U"
+                    
+                    unstandardized_train_output = unstandardize_features(Unified_Feature_output_train, mean_train_tensors[f'Unified'], std_train_tensors[f'Unified'])
+                    # unstandardized_train_output = unstandardize_features(LR_Unified_train, mean_train_tensors[f'Unified'], std_train_tensors[f'Unified'])                   
 
                     Global_Unified_field_outputs = []
                     for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
-                        coef = field_net(DeNormalized_train_output)
+                        coef = field_net(unstandardized_train_output)
                         combine = coef * baseF
                         Global_Unified_field_output = torch.sum(combine, dim=2, keepdim=True)
                         Global_Unified_field_outputs.append(Global_Unified_field_output)
-                    Global_Unified_Gout = torch.cat(Global_Unified_field_outputs, dim=-1) #   All the field_idx(th) field results from Global_Unified_U
+                    Global_Unified_Gout = torch.cat(Global_Unified_field_outputs, dim=-1) #   All the field_idx(th) field results from Global_Unified_U  
 
                     field_loss_data, field_losses = custom_mse_loss(Global_Unified_Gout, G, field_weights)
                     Total_Field_train_loss_Data += field_loss_data
@@ -340,20 +396,21 @@ if __name__ == '__main__':
         with torch.no_grad():  
             for U, Y, G, Yin, Gin in get_data_iter(U_test, Y_test, G_test, Yin_test, Gin_test):
                 if (NET_TYPE == 0):
-                    Predicted_Features, Unified_Feature_output_test = net(Yin, Gin, num_heads, Min_Value_Test, Max_Value_Test)
+                    Predicted_Features, Unified_Feature_output_test = net(Yin, Gin, num_heads, mean_test_tensors, std_test_tensors)
                 elif (NET_TYPE == 1):
                     Unified_Feature_output_test = net(Yin, Gin)
                 else:
                     print('Net is not correctly defined !!!')
                     exit()
 
-                for id in range( len(field_names) ):
-                    field_output = Predicted_Features[:, :, id]
-                    field_target = field_info_test_tensors[f'field_info_{field_names[id]}']
-                    field_loss = criterion(field_output, field_target)
-                    test_losses[id] = field_loss.item()
-                    
-                    test_loss += field_loss
+                if (NET_TYPE == 0): # This is only calculated when the Encoder is reused in fine-tuning stage
+                    for id in range( len(field_names) ):
+                        field_output = Predicted_Features[:, :, id]
+                        field_target = field_info_test_tensors[f'field_info_{field_names[id]}']
+                        field_loss = criterion(field_output, field_target)
+                        test_losses[id] = field_loss.item()
+                        
+                        test_loss += field_loss
                 
                 mse_loss_Unifed_test = criterion(Unified_Feature_output_test, LR_Unified_test)
                 test_losses[ len(field_names) ] = mse_loss_Unifed_test
@@ -361,12 +418,13 @@ if __name__ == '__main__':
 
                 if EVALUATE is True and (epoch + 1) % N_REPORT == 0:
                     baseF = PreTrained_net.PosNet(Y)
-                    DeNormalized_test_output = Denormalize_data(Unified_Feature_output_test, Min_Value_Test[len(field_names)], Max_Value_Test[len(field_names)]) # This is the recovered "Global_Unified_U"
-                    # DeNormalized_test_output = Denormalize_data(LR_Unified_test, Min_Value_Test[len(field_names)], Max_Value_Test[len(field_names)]) # This is the recovered "Global_Unified_U"
 
+                    unstandardized_test_output = unstandardize_features(Unified_Feature_output_test, mean_test_tensors[f'Unified'], std_test_tensors[f'Unified'])
+                    # unstandardized_test_output = unstandardize_features(LR_Unified_test, mean_test_tensors[f'Unified'], std_test_tensors[f'Unified'])
+                    
                     Global_Unified_field_outputs = []
                     for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
-                        coef = field_net(DeNormalized_test_output)
+                        coef = field_net(unstandardized_test_output)
                         combine = coef * baseF
                         Global_Unified_field_output = torch.sum(combine, dim=2, keepdim=True)
                         Global_Unified_field_outputs.append(Global_Unified_field_output)
@@ -449,7 +507,7 @@ if __name__ == '__main__':
                 print(f'Best combined loss so far is {best_combined_loss}, still improving')
                 counter = 0
                 
-                model_save_path = 'Output_Net/net_{}_state_dict.pth'.format(NET_NAME[NET_TYPE])
+                model_save_path = f'Output_Net/net_{NET_NAME[NET_TYPE]}_state_dict.pth'
                 torch.save(net.module.state_dict(), model_save_path)
                 print('Successfully saved the latest best net at {}'.format(model_save_path))
                 print('...Successfully Saved net.pic')

@@ -477,7 +477,7 @@ class FieldToField_TransformerNet(nn.Module):
 
         return Gout
 
-class Self_Representation_PreTrain_Net(nn.Module): 
+class MRPT_PreTrain_Net_ParallelMode(nn.Module): 
     def __init__(self, n_field_info, n_base, num_heads, num_layers, num_fields):
         print("num_heads", num_heads)
         print("num_fields", num_fields)
@@ -875,16 +875,17 @@ class Mutual_SensorToFeature(nn.Module):
 
 # Using F2F inter-inference to recover the unified latent feature from single-field sparse measurements
 class Mutual_SensorToFeature_InterInference(nn.Module):
-    def __init__(self, layer_sizes, PreTrained_net, num_fields = 9):
+    def __init__(self, layer_sizes, Final_layer_sizes, PreTrained_net, num_fields = 9):
         super(Mutual_SensorToFeature_InterInference, self).__init__()
         self.n_fields = num_fields
 
         print('layer_sizes of MLP is ', layer_sizes)
+        print('layer_sizes of Final MLP is ', Final_layer_sizes)
         if isinstance(PreTrained_net, nn.DataParallel):
             PreTrained_net = PreTrained_net.module
 
         self.MLPs = nn.ModuleList([MLP(layer_sizes) for _ in range(num_fields)]) 
-        self.MLP_Final = MLP([36, 300, 300, 36])
+        self.MLP_Final = MLP(Final_layer_sizes)
 
         self.PreTrained_net = PreTrained_net
         self.net_Y_Gins = PreTrained_net.net_Y_Gins
@@ -1010,35 +1011,132 @@ class Mutual_SensorToFeature_InterInference_LoadFeature(nn.Module):
         compressed_info_ALL = torch.stack(compressed_info_list, dim=-1) # [n_batch, n_field_info, n_fields]: The latent representations from one field out of all Encoders
 
         #____________________________(2) Normalization and Correction______________________________
-        Norm_compressed_info_list = []
-        for id in range(self.n_fields):  
-            Norm_compressed_info = self.normalize_data(compressed_info_ALL[:, :, id], min_val_all[id], max_val_all[id])
-            Norm_compressed_info_list.append(Norm_compressed_info)
-        Norm_compressed_info_ALL = torch.stack(Norm_compressed_info_list, dim=-1)
-        # New tensor by concatenating the last dimension
-        compressed_info_concat = Norm_compressed_info_ALL.reshape(Norm_compressed_info_ALL.shape[0], -1)  # [n_batch, n_field_info * n_fields]
+        # Norm_compressed_info_list = []
+        # for id in range(self.n_fields):  
+        #     Norm_compressed_info = self.normalize_data(compressed_info_ALL[:, :, id], min_val_all[id], max_val_all[id])
+        #     Norm_compressed_info_list.append(Norm_compressed_info)
+        # Norm_compressed_info_ALL = torch.stack(Norm_compressed_info_list, dim=-1)
+        # # New tensor by concatenating the last dimension
+        # compressed_info_concat = Norm_compressed_info_ALL.reshape(Norm_compressed_info_ALL.shape[0], -1)  # [n_batch, n_field_info * n_fields]
 
+        # Predicted_Features_list = []
+        # for id in range(self.n_fields):
+        #     Feature_id = self.MLPs[id](compressed_info_concat) + Norm_compressed_info_ALL[:, :, id]  #   MLPs will map the Concatenated APPROXIMATE latent representations to the accurate UNIFEID one from the id(th) encoder
+        #     # Feature_id = self.MLPs[id](compressed_info_concat)
+
+        #     Predicted_Features_list.append(Feature_id)
+        # Predicted_Features = torch.stack(Predicted_Features_list, dim=-1) # These will be the NORMALIZED latent representations for all fields
+
+        compressed_info_concat = compressed_info_ALL.reshape(compressed_info_ALL.shape[0], -1)  # [n_batch, n_field_info * n_fields]
         Predicted_Features_list = []
         for id in range(self.n_fields):
-            Feature_id = self.MLPs[id](compressed_info_concat) + Norm_compressed_info_ALL[:, :, id]  #   MLPs will map the Concatenated APPROXIMATE latent representations to the accurate UNIFEID one from the id(th) encoder
+            Feature_id = self.MLPs[id](compressed_info_concat) + compressed_info_ALL[:, :, id]  #   MLPs will map the Concatenated APPROXIMATE latent representations to the accurate UNIFEID one from the id(th) encoder
             # Feature_id = self.MLPs[id](compressed_info_concat)
-
             Predicted_Features_list.append(Feature_id)
         Predicted_Features = torch.stack(Predicted_Features_list, dim=-1) # These will be the NORMALIZED latent representations for all fields
 
+        DeNorm_compressed_info_list = []
+        for id in range(self.n_fields):  
+            DeNorm_compressed_info = self.Denormalize_data(Predicted_Features[:, :, id], min_val_all[id], max_val_all[id])
+            DeNorm_compressed_info_list.append(DeNorm_compressed_info)
+        DeNorm_compressed_info_ALL = torch.stack(DeNorm_compressed_info_list, dim=-1)
+
         #____________________________(3) Final merge and Correction________________________________
-        DeNorm_Predicted_Features_list = []
-        for id in range(self.n_fields):
-            DeNorm_Feature_id = self.Denormalize_data(Predicted_Features[:, :, id], min_val_all[id], max_val_all[id])
-            DeNorm_Predicted_Features_list.append(DeNorm_Feature_id)
-        DeNorm_Predicted_Features = torch.stack(DeNorm_Predicted_Features_list, dim=-1)
+        # DeNorm_Predicted_Features_list = []
+        # for id in range(self.n_fields):
+        #     DeNorm_Feature_id = self.Denormalize_data(Predicted_Features[:, :, id], min_val_all[id], max_val_all[id])
+        #     DeNorm_Predicted_Features_list.append(DeNorm_Feature_id)
+        # DeNorm_Predicted_Features = torch.stack(DeNorm_Predicted_Features_list, dim=-1)
         
-        Global_Unified_U = self.FinalMerge(DeNorm_Predicted_Features, -1)
+        # Global_Unified_U = self.FinalMerge(DeNorm_Predicted_Features, -1)
+        # Norm_Global_Unified_U = self.normalize_data(Global_Unified_U, min_val_all[self.n_fields], max_val_all[self.n_fields])
+
+        # U_Unified = self.MLP_Final(Norm_Global_Unified_U) + Norm_Global_Unified_U  # Add a ResNet. The field_idx(th) mlp is used to map from the merged_unify to final output 
+        
+        Global_Unified_U = self.FinalMerge(DeNorm_compressed_info_ALL, -1)
         Norm_Global_Unified_U = self.normalize_data(Global_Unified_U, min_val_all[self.n_fields], max_val_all[self.n_fields])
 
         U_Unified = self.MLP_Final(Norm_Global_Unified_U) + Norm_Global_Unified_U  # Add a ResNet. The field_idx(th) mlp is used to map from the merged_unify to final output 
-        # U_Unified = Norm_Global_Unified_U
-    
+
+        return Predicted_Features, U_Unified
+
+class Mutual_SensorToFeature_InterInference_LoadFeature_STD(nn.Module):
+    def __init__(self, layer_sizes, Final_layer_sizes, PreTrained_net, num_fields = 9):
+        super(Mutual_SensorToFeature_InterInference_LoadFeature_STD, self).__init__()
+        self.n_fields = num_fields
+        self.field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
+
+        print('layer_sizes of MLP is ', layer_sizes)
+        print('layer_sizes of Final MLP is ', Final_layer_sizes)
+        if isinstance(PreTrained_net, nn.DataParallel):
+            PreTrained_net = PreTrained_net.module
+
+        self.MLPs = nn.ModuleList([MLP(layer_sizes) for _ in range(num_fields)]) 
+        self.MLP_Final = MLP(Final_layer_sizes)
+
+        self.PreTrained_net = PreTrained_net
+        self.net_Y_Gins = PreTrained_net.net_Y_Gins
+        self.transformer_layers = PreTrained_net.transformer_layers
+        self.FinalMerge = PreTrained_net.FinalMerge
+        self.PosNet = PreTrained_net.PosNet
+
+    def standardize_features(self, latent_vectors, mean, std):
+        epsilon = 1e-8
+        std = torch.clamp(std, min=epsilon)
+        
+        standardized_vectors = (latent_vectors - mean) / std
+        return standardized_vectors
+
+    def unstandardize_features(self, standardized_vectors, mean, std):
+        return standardized_vectors * std + mean
+
+    def forward(self, Yin, Gin, num_heads, mean_tensors, std_tensors):   # Yin and Gin are the sparse measurements of one field
+
+        Base_Y = self.PosNet(Yin)   #   [n_batch, np_selected, n_dim -> n_base]
+        Gin_Y =  torch.cat((Base_Y, Gin), dim=2)    #   [n_batch, np_selected, n_base + 1]
+
+        #____________________________(1) PRE-TRAINED ENCODERs_____________________________________
+        compressed_info_list = []
+        STD_compressed_info_list = []
+        for id in range(self.n_fields):  
+            field_info = self.net_Y_Gins[id](Gin_Y)  #   [n_batch, np_selected, n_field_info], the UP-LIFTING net in each encoder will "take a look"
+            for layer in self.transformer_layers:    #   And then, the Transformer in each encoder will re-organize the information
+                field_info = layer(field_info, id, num_heads)
+            
+            compressed_info = field_info.mean(dim=1)    #   [n_batch, n_field_info]
+            STD_compressed_info = self.standardize_features(compressed_info, mean_tensors[f'field_info_{self.field_names[id]}'], std_tensors[f'field_info_{self.field_names[id]}'])
+            
+            compressed_info_list.append(compressed_info)
+            STD_compressed_info_list.append(STD_compressed_info)
+        compressed_info_ALL = torch.stack(compressed_info_list, dim=-1) # [n_batch, n_field_info, n_fields]: The latent representations from one field out of all Encoders
+        STD_compressed_info_ALL = torch.stack(STD_compressed_info_list, dim=-1)
+
+        #____________________________(2) Standardization and Correction______________________________
+
+        compressed_info_concat = compressed_info_ALL.reshape(compressed_info_ALL.shape[0], -1)  # [n_batch, n_field_info * n_fields]
+        STD_compressed_info_concat = STD_compressed_info_ALL.reshape(STD_compressed_info_ALL.shape[0], -1)  # [n_batch, n_field_info * n_fields]
+        
+        Predicted_Features_list = []
+        for id in range(self.n_fields):
+            # Feature_id = self.MLPs[id](compressed_info_concat) + compressed_info_ALL[:, :, id]  #   MLPs will map the Concatenated APPROXIMATE latent representations to the accurate UNIFEID one from the id(th) encoder
+            # Feature_id = self.MLPs[id](compressed_info_concat)
+            Feature_id = self.MLPs[id](STD_compressed_info_concat) + STD_compressed_info_ALL[:, :, id]
+
+            Predicted_Features_list.append(Feature_id)
+        Predicted_Features = torch.stack(Predicted_Features_list, dim=-1)   # This is supposed to be the standardized features
+
+        UnSTD_compressed_info_list = []
+        for id in range(self.n_fields):  
+            UnSTD_compressed_info = self.unstandardize_features(Predicted_Features[:, :, id], mean_tensors[f'field_info_{self.field_names[id]}'], std_tensors[f'field_info_{self.field_names[id]}'])
+            UnSTD_compressed_info_list.append(UnSTD_compressed_info)
+        UnSTD_compressed_info_ALL = torch.stack(UnSTD_compressed_info_list, dim=-1)
+
+        #____________________________(3) Final merge and Correction________________________________
+        Global_Unified_U = self.FinalMerge(UnSTD_compressed_info_ALL, -1)
+        STD_Global_Unified_U = self.standardize_features(Global_Unified_U, mean_tensors[f'Unified'], std_tensors[f'Unified'])
+        # U_Unified = self.MLP_Final(Global_Unified_U) + Global_Unified_U  # Add a ResNet. The field_idx(th) mlp is used to map from the merged_unify to final output 
+        U_Unified = self.MLP_Final(STD_Global_Unified_U) + STD_Global_Unified_U  # Add a ResNet. The field_idx(th) mlp is used to map from the merged_unify to final output 
+
         return Predicted_Features, U_Unified
 
 # Perform parameter inversion task: Using F2F inter-inference to recover the unified latent feature from single-field sparse measurements

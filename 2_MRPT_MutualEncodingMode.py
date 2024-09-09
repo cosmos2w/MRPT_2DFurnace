@@ -19,12 +19,13 @@ from network import Mutual_Representation_PreTrain_Net
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 # Specify the GPUs to use
-device_ids = [0, 1, 2]
+device_ids = [0, 1]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
 N_EPOCH = 200000
 Case_Num = 300
+N_P_Selected = 200
 n_field_info = 36
 n_baseF = 40 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
@@ -32,12 +33,12 @@ field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 Unified_Weight = 5.0 # Contribution of the unified feature
 
 #Transformer layer parameters
-num_heads = 9
+num_heads = 6
 num_layers = 1
 #____________________________________________________________________
 
 NET_SETTINGS = 'Field_weights [^2.0] & Unified 5.0, use drop-out 0.40 & 0.10 & 0.05\tUnified_Weight = 5.0\tn_field_info = 36\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
-NET_NAME = 'MRPT_Standard'
+NET_NAME = f'MRPT_Standard_{N_P_Selected}'
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -45,16 +46,16 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N_P_Selected = 600, batch_size = 101): # random sampling in each epoch
+def get_data_iter(U, Y, G, N, batch_size = 120): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
-    np.random.shuffle(indices)  # 样本的读取顺序是随机的
+    np.random.shuffle(indices)  
     for i in range(0, num_examples, batch_size):
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
+        selected_points = torch.randperm(num_points)[:N].to(device)
         yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points)
 
 def field_custom_mse_loss(output, target, field_idx, field_weights):
@@ -172,7 +173,7 @@ if __name__ == '__main__':
         train_batch_count = 0
         test_batch_count = 0
 
-        for U, Y, G in get_data_iter(U_train, Y_train, G_train):
+        for U, Y, G in get_data_iter(U_train, Y_train, G_train, N = N_P_Selected):
             optimizer.zero_grad()
             att_index_expanded = att_index.unsqueeze(0).repeat(len(device_ids), 1, 1)
             
@@ -232,7 +233,7 @@ if __name__ == '__main__':
 
             with torch.no_grad():  # Make sure  to use no_grad for evaluation in test phase
 
-                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N_P_Selected = 2000):
+                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N = 2000):
                     # output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
                     output, Unified_output = net(U, Y, G, num_heads)
                     output_stacked = torch.stack(output, dim=0) 

@@ -18,7 +18,7 @@ from constant import DataSplit
 from network import Mutual_Representation_PreTrain_Net_SingleMerge
 
 # Specify the GPUs to use
-device_ids = [0, 1, 2]
+device_ids = [0, 1]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 WRITE_FEATURE = False   # Determine whether feature vectors should be documented
@@ -29,14 +29,14 @@ n_field_info = 36
 n_baseF = 40 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 Unified_Weight = 5.0 # Contribution of the unified feature
-N_P_Selected = 750
+N_P_Selected = 200
 
 #Transformer layer parameters
-num_heads = 9
+num_heads = 6
 num_layers = 1
 
-NET_SETTINGS = f'Position encoding for up-lifting\tUnified_Weight = 5.0\tn_field_info = {n_field_info}\tMultiHeadAttention=9 & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 60, 60, 60, n_base])\n'
-NET_NAME = f'MRPT_SingleMerge'
+NET_SETTINGS = f'Position encoding for up-lifting\tUnified_Weight = 5.0\tn_field_info = {n_field_info}\tMultiHeadAttention={num_heads} & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 60, 60, 60, n_base])\n'
+NET_NAME = f'MRPT_SingleMerge_{N_P_Selected}'
 
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -51,16 +51,16 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N_P_Selected = N_P_Selected, batch_size = 360): # random sampling in each epoch
+def get_data_iter(U, Y, G, N, batch_size = 360): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
-    np.random.shuffle(indices)  # 样本的读取顺序是随机的
+    np.random.shuffle(indices)  
     for i in range(0, num_examples, batch_size):
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) # 最后一次可能不足一个batch
         j = j.to(device)
 
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
+        selected_points = torch.randperm(num_points)[:N].to(device)
         yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points)
 
 def custom_mse_loss(output, target, field_weights):
@@ -114,7 +114,7 @@ if __name__ == '__main__':
     net = nn.DataParallel(net, device_ids=device_ids)
     net.apply(weights_init)
 
-    optimizer = optim.Adam(net.parameters(), lr=0.0010)  # weight_decay=1e-4
+    optimizer = optim.Adam(net.parameters(), lr=0.00050)  # weight_decay=1e-4
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.98, patience=1000, verbose=True, min_lr=0.0002)
 
     # Set up early stopping parameters
@@ -147,7 +147,7 @@ if __name__ == '__main__':
         train_batch_count = 0
         test_batch_count = 0
 
-        for U, Y, G in get_data_iter(U_train, Y_train, G_train):
+        for U, Y, G in get_data_iter(U_train, Y_train, G_train, N = N_P_Selected):
 
             optimizer.zero_grad()
             output = net(U, Y, G, num_heads)
@@ -194,7 +194,7 @@ if __name__ == '__main__':
 
             with torch.no_grad():  # Make sure  to use no_grad for evaluation in test phase
 
-                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N_P_Selected = 1500):
+                for U, Y, G in get_data_iter(U_test, Y_test, G_test, N = 2000):
                     output = net(U, Y, G, num_heads)
                     output_stacked = torch.stack(output, dim=0)
                     for field_idx in range(len(field_names) + 1):
