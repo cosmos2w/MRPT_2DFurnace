@@ -25,7 +25,7 @@ Case_Num = 300
 N_P_Selected = 200
 n_field_info = 36
 n_baseF = 40 
-n_cond = 11 #Length of the condition vector in U
+
 Unified_Weight = 5.0 # Contribution of the unified feature
 
 #Transformer layer parameters
@@ -57,7 +57,7 @@ def get_data_iter(U, Y, G, N, batch_size = 180): # random sampling in each epoch
     indices = list(range(num_examples))
     np.random.shuffle(indices)  
     for i in range(0, num_examples, batch_size):
-        j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) # 最后一次可能不足一个batch
+        j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
         selected_points = torch.randperm(num_points)[:N].to(device)

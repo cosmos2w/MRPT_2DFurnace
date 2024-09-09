@@ -20,15 +20,15 @@ n_baseF = 40
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 field_idx = 0 # The selected field for sparse reconstruction
 n_fields = len(field_names)
-N_selected = 50  
+N_selected = 25  
 N_P_Selected = 1200
 EVALUATION = True
 
 #Transformer layer parameters
-num_heads = 9
+num_heads = 6
 num_layers = 1
 
-PreTrained_Net_Name = 'net_MRPT_Standard_state_dict'
+PreTrained_Net_Name = 'net_MRPT_Standard_200_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
 
 outFile = f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}.pic'

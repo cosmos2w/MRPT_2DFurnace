@@ -15,7 +15,7 @@ import pickle
 from tqdm import tqdm
 from torch import nn 
 from constant import DataSplit 
-from network import Mutual_Representation_PreTrain_Net_SingleMerge
+from network import MRPT_PreTrain_Net_MutualDecodingMode
 
 # Specify the GPUs to use
 device_ids = [0, 1]
@@ -57,7 +57,7 @@ def get_data_iter(U, Y, G, N, batch_size = 360): # random sampling in each epoch
     indices = list(range(num_examples))
     np.random.shuffle(indices)  
     for i in range(0, num_examples, batch_size):
-        j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) # 最后一次可能不足一个batch
+        j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
         selected_points = torch.randperm(num_points)[:N].to(device)
@@ -110,7 +110,7 @@ if __name__ == '__main__':
     Ini_Concern_weights = torch.tensor([1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0])
     Ini_Concern_weights = Ini_Concern_weights.to(device)
 
-    net = Mutual_Representation_PreTrain_Net_SingleMerge(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
+    net = MRPT_PreTrain_Net_MutualDecodingMode(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     net = nn.DataParallel(net, device_ids=device_ids)
     net.apply(weights_init)
 

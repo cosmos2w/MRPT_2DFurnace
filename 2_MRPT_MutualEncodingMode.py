@@ -19,7 +19,7 @@ from network import Mutual_Representation_PreTrain_Net
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 # Specify the GPUs to use
-device_ids = [0, 1]
+device_ids = [1, 2]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
@@ -27,7 +27,7 @@ N_EPOCH = 200000
 Case_Num = 300
 N_P_Selected = 200
 n_field_info = 36
-n_baseF = 40 
+n_baseF = 50 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 
 Unified_Weight = 5.0 # Contribution of the unified feature
@@ -35,10 +35,15 @@ Unified_Weight = 5.0 # Contribution of the unified feature
 #Transformer layer parameters
 num_heads = 6
 num_layers = 1
+
+RELOAD = False # To determine if the training starts from a previous aborted task
 #____________________________________________________________________
 
-NET_SETTINGS = 'Field_weights [^2.0] & Unified 5.0, use drop-out 0.40 & 0.10 & 0.05\tUnified_Weight = 5.0\tn_field_info = 36\tMultiHeadAttention=9 & layer=1\tn_baseF = 40\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
-NET_NAME = f'MRPT_Standard_{N_P_Selected}'
+NET_SETTINGS = 'Field_weights [^2.0] & Unified 5.0, use drop-out 0.50 & 0.10 & 0.10\tUnified_Weight = 5.0\tn_field_info = 36\tMultiHeadAttention={num_heads} & layer=1\tn_baseF = 40\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 50, 50, 50, n_base])\n'
+NET_NAME = f'MRPT_Standard_{N_P_Selected}_2'
+
+Reload_Net_Name = 'net_MRPT_Standard_200_state_dict'
+Reload_file_path = 'Output_Net/{}.pth'.format(Reload_Net_Name)
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -46,7 +51,7 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N, batch_size = 120): # random sampling in each epoch
+def get_data_iter(U, Y, G, N, batch_size = 100): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
@@ -59,8 +64,10 @@ def get_data_iter(U, Y, G, N, batch_size = 120): # random sampling in each epoch
         yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points)
 
 def field_custom_mse_loss(output, target, field_idx, field_weights):
-    # print('output.shape is ', output.shape)
-    # print('target.shape is ', target.shape)
+
+    # print("output.device is", output.device)
+    # print("target.device is", target.device)
+
     num_fields = target.size(-1)
     total_loss = 0
     weighted_total_loss = 0
@@ -127,9 +134,14 @@ if __name__ == '__main__':
 
     net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
 
+    if RELOAD is True:
+        state_dict = torch.load(Reload_file_path)
+        net.load_state_dict(state_dict)
+        print(f'\nI have Loaded the pretrained net from {Reload_file_path}\n')
+
     # Wrap the model with DataParallel 
     net = nn.DataParallel(net, device_ids=device_ids)
-    net.apply(weights_init)
+    if RELOAD is False: net.apply(weights_init)
 
     optimizer = optim.Adam(net.parameters(), lr=0.00050)  # , weight_decay=1e-5
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.98, patience=2000, verbose=True, min_lr=0.0002)
@@ -144,14 +156,6 @@ if __name__ == '__main__':
     Field_weights_All = torch.zeros(len(field_names), len(field_names))
     Field_weights_All = Field_weights_All.fill_(1.0).to(device)
 
-    # Create an empty tensor of the appropriate size
-    att_index = torch.empty((len(field_names), len(field_names)), dtype=torch.long)  # Use dtype=torch.long for indices
-    # Fill each row with a unique random permutation
-    for i in range(len(field_names)):
-        att_index[i] = torch.randperm(len(field_names))
-    # Move the tensor to the specified device
-    att_index = att_index.to(device)
-    # print('att_index is ', att_index)
 
     for epoch in range(N_EPOCH):
 
@@ -175,9 +179,7 @@ if __name__ == '__main__':
 
         for U, Y, G in get_data_iter(U_train, Y_train, G_train, N = N_P_Selected):
             optimizer.zero_grad()
-            att_index_expanded = att_index.unsqueeze(0).repeat(len(device_ids), 1, 1)
-            
-            # output, Unified_output = net(U, Y, G, att_index_expanded, num_heads)
+
             output, Unified_output = net(U, Y, G, num_heads)
             output_stacked = torch.stack(output, dim=0) 
             # print("output_stacked shape:", output_stacked.shape)  # Should print [n_fields (from), n_batch, n_point_select, n_fields+1 (for, plus a Unifed)]
@@ -188,19 +190,22 @@ if __name__ == '__main__':
                 output_Select = output_stacked[field_idx, :, :, :] # Picking out the reconstructed field_idx(th) field results from all fields & Unified
                 
                 field_weights = Field_weights_All[field_idx, :]
-                weighted_loss_data, loss_data, losses, sorted_indices = field_custom_mse_loss(output_Select, G, field_idx, field_weights)  
-                loss += weighted_loss_data
+                weighted_loss_data, loss_data, losses, sorted_indices = field_custom_mse_loss(output_Select, G, field_idx, field_weights)
 
-                att_index[field_idx] = torch.tensor(sorted_indices, dtype=torch.int32)
+                loss += weighted_loss_data
                                
                 Total_train_loss_Data += loss_data
                 train_loss[field_idx] += loss_data
                 # Update train_losses for the current field or unified feature
+                losses = losses.to(device)
+                # print("train_losses.device is", train_losses.device)
+                # print("losses.device is", losses.device)
                 for j, loss_item in enumerate(losses):
                     train_losses[field_idx, j] += loss_item
 
             # Losses for reconstructing all fields from the Global Unified representation
             Unifed_loss_data, Unifed_losses = custom_mse_loss(Unified_output, G)
+            Unifed_losses = Unifed_losses.to(device)
             loss += Unifed_loss_data * Unified_Weight
             Total_train_loss_Data += Unifed_loss_data
             Unified_train_loss += Unifed_loss_data
@@ -247,11 +252,13 @@ if __name__ == '__main__':
                         Total_test_loss_Data += loss_data
                         test_loss[field_idx] += loss_data
                         # Update train_losses for the current field or unified feature
+                        losses = losses.to(device)
                         for j, loss_item in enumerate(losses):
                             test_losses[field_idx, j] += loss_item
 
                     # Losses for reconstructing all fields from the Global Unified representation
                     Unifed_loss_data, Unifed_losses = custom_mse_loss(Unified_output, G)
+                    Unifed_losses = Unifed_losses.to(device)
                     Total_test_loss_Data += Unifed_loss_data
                     Unified_test_loss += Unifed_loss_data
                     for j, loss_item in enumerate(Unifed_losses):
