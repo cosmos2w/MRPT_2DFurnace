@@ -20,7 +20,7 @@ import pickle
 
 from torch import nn 
 from constant import DataSplit_STD 
-from network import MRPT_PreTrain_Net_ParallelMode, Parallel_SensorToFeature_STD
+from network import MRPT_PreTrain_Net_ParallelMode, Parallel_SensorToFeature_STD, Direct_SensorToFeature
 
 # Specify the GPUs to use
 device_ids = [0]
@@ -39,7 +39,7 @@ n_baseF      = 40
 n_cond       = 11 #Length of the condition vector in U
 
 field_idx    = 0 # The field used for sparse reconstruction
-N_selected   = 25 # Points selected for sparse reconstruction
+N_selected   = 50 # Points selected for sparse reconstruction
 N_P_Selected = 2000 # points to evaluate performances
 #Transformer layer parameters
 num_heads    = 6

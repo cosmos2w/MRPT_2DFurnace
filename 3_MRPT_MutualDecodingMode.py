@@ -26,7 +26,7 @@ WRITE_FEATURE = False   # Determine whether feature vectors should be documented
 N_EPOCH = 2000000
 Case_Num = 300
 n_field_info = 36
-n_baseF = 40 
+n_baseF = 50 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 Unified_Weight = 5.0 # Contribution of the unified feature
 N_P_Selected = 200
@@ -35,8 +35,8 @@ N_P_Selected = 200
 num_heads = 6
 num_layers = 1
 
-NET_SETTINGS = f'Position encoding for up-lifting\tUnified_Weight = 5.0\tn_field_info = {n_field_info}\tMultiHeadAttention={num_heads} & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 60, 60, 60, n_base])\n'
-NET_NAME = f'MRPT_SingleMerge_{N_P_Selected}'
+NET_SETTINGS = f'n_field_info = {n_field_info}\tMultiHeadAttention={num_heads} & layer=1\tn_baseF = {n_baseF}\tnet_Y_Gin=[n_baseF + 1, 50, 50, n_field_info]\tConNet=[n_field_info, 50, 50, n_base]\tPositionNet([2, 60, 60, 60, n_base])\n'
+NET_NAME = f'MRPT_MutualDecoding_{N_P_Selected}'
 
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -51,7 +51,7 @@ def weights_init(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-def get_data_iter(U, Y, G, N, batch_size = 360): # random sampling in each epoch
+def get_data_iter(U, Y, G, N, batch_size = 100): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))

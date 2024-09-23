@@ -21,7 +21,7 @@ n_baseF = 40
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 field_idx = 0 # The selected field for sparse reconstruction
 n_fields = len(field_names)
-N_selected = 50  
+N_selected = 100  
 N_P_Selected = 1000
 EVALUATION = True
 

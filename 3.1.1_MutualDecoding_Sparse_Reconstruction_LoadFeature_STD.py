@@ -20,7 +20,7 @@ import pickle
 
 from torch import nn 
 from constant import DataSplit_STD 
-from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference, Mutual_SensorToFeature_InterInference_LoadFeature_STD
+from network import MRPT_PreTrain_Net_MutualDecodingMode, MutualDecoding_SensorToFeature_STD, Direct_SensorToFeature
 
 # Specify the GPUs to use
 device_ids = [0]
@@ -39,14 +39,14 @@ n_baseF      = 40
 n_cond       = 11 #Length of the condition vector in U
 
 field_idx    = 0 # The field used for sparse reconstruction
-N_selected   = 25 # Points selected for sparse reconstruction
+N_selected   = 100 # Points selected for sparse reconstruction
 N_P_Selected = 2000 # points to evaluate performances
 #Transformer layer parameters
 num_heads    = 6
 num_layers   = 1
 
-hidden_sizes = [300, 300]
-layer_sizes = [n_field_info * len(field_names)] + hidden_sizes + [n_field_info]  
+hidden_sizes = [500, 500]
+layer_sizes = [n_field_info] + hidden_sizes + [n_field_info]  
 Final_layer_sizes = [n_field_info] + hidden_sizes + [n_field_info] 
 
 Unifed_weight = 5.0
@@ -54,9 +54,9 @@ Unifed_weight = 5.0
 NET_TYPE = int(0) 
                 # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
 NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_FromF{field_idx}_N{N_selected}_LoadFeature_STD', f'Direct_SensorToFeature_N{N_selected}_STD']
+NET_NAME = [f'MRPT_MutualDecoding_SensorToFeature_FromF{field_idx}_N{N_selected}', f'Direct_SensorToFeature_N{N_selected}_STD']
 
-PreTrained_Net_Name = 'net_MRPT_Standard_200_state_dict'
+PreTrained_Net_Name = 'net_MRPT_SingleMerge_200_state_dict'
 Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
 
 
@@ -111,7 +111,7 @@ if __name__ == '__main__':
             pass
 
     # Load the pretrained net
-    PreTrained_net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
+    PreTrained_net = MRPT_PreTrain_Net_MutualDecodingMode(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     state_dict = torch.load(Load_file_path)
     PreTrained_net.load_state_dict(state_dict)
 
@@ -122,7 +122,7 @@ if __name__ == '__main__':
     std_train_tensors = {}
     std_test_tensors = {}
 
-    with open(f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic', 'rb') as fp: 
+    with open(f'data_split/data_split_MRPT_MutualDecoding_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train          = data_split.U_train.to(device)
@@ -288,7 +288,7 @@ if __name__ == '__main__':
 
     # Define the network
     if (NET_TYPE == 0):
-        net = Mutual_SensorToFeature_InterInference_LoadFeature_STD(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
+        net = MutualDecoding_SensorToFeature_STD(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
         # Fix the parameters in the petrained net
         for param in net.PreTrained_net.parameters():
             param.requires_grad = False
@@ -338,7 +338,7 @@ if __name__ == '__main__':
             # Entering the training phase:
             #----------------------------
             if (NET_TYPE == 0):
-                Predicted_Features, Unified_Feature_output_train = net(Yin, Gin, num_heads, mean_train_tensors, std_train_tensors)
+                Predicted_Features, Unified_Feature_output_train = net(Yin, Gin, num_heads, field_idx, mean_train_tensors, std_train_tensors)
             elif (NET_TYPE == 1):
                 Unified_Feature_output_train = net(Yin, Gin)
             else:
@@ -397,7 +397,7 @@ if __name__ == '__main__':
         with torch.no_grad():  
             for U, Y, G, Yin, Gin in get_data_iter(U_test, Y_test, G_test, Yin_test, Gin_test):
                 if (NET_TYPE == 0):
-                    Predicted_Features, Unified_Feature_output_test = net(Yin, Gin, num_heads, mean_test_tensors, std_test_tensors)
+                    Predicted_Features, Unified_Feature_output_test = net(Yin, Gin, num_heads, field_idx, mean_test_tensors, std_test_tensors)
                 elif (NET_TYPE == 1):
                     Unified_Feature_output_test = net(Yin, Gin)
                 else:

@@ -754,7 +754,7 @@ class Mutual_Representation_PreTrain_Net(nn.Module): # Pre-training F2F task via
 # To predict unseen variables based on pre-trained net
 class Mutual_MultiEn_MultiDe_FineTune_Net(nn.Module):
     def __init__(self, n_inputF, n_field_info, n_base, PreTrained_net):
-        super(Mutual_MultiEn_MultiDe_FineTune_Net, self).__init__()
+        super().__init__()
         
         if isinstance(PreTrained_net, nn.DataParallel):
             PreTrained_net = PreTrained_net.module
@@ -772,31 +772,22 @@ class Mutual_MultiEn_MultiDe_FineTune_Net(nn.Module):
         self.FieldMerges = PreTrained_net.FieldMerges
         self.FinalMerge = PreTrained_net.FinalMerge
 
-    def forward(self, U, Y, G_PreTrain, num_heads, att_index, mode):
+    def forward(self, U, Y, G_PreTrain, num_heads, mode):
         if mode is True: # True means the reconstruction will proceed based on the pre-trained net 
-
             with torch.no_grad(): 
                 baseF = self.PosNet(Y)
-                att_index = att_index[0]
 
                 n_fields = G_PreTrain.shape[-1]
                 # print('G_PreTrain.shape is ', G_PreTrain.shape)
-                # print('att_index is', att_index)
                 U_Unified_list = []
                 for field_idx in range(n_fields):
                     field_info = self._compress_data(baseF, G_PreTrain, field_idx, num_heads) 
-                    
-                    fields_to_exclude = att_index[field_idx, -2:].tolist()  
-                    if field_idx in fields_to_exclude:
-                        # If yes, extend the exclusion to include one more index
-                        fields_to_exclude = att_index[field_idx, -3:].tolist()  # Now taking the last four indices
-                    # print('fields_to_exclude is ',fields_to_exclude)
 
-                    U_Unified = self.FieldMerges[field_idx](field_info, field_idx, fields_to_exclude)
+                    U_Unified = self.FieldMerges[field_idx](field_info, field_idx)
                     U_Unified_list.append(U_Unified)
 
                 Global_Unified_U = torch.stack(U_Unified_list, dim=2) 
-                Global_Unified_U = self.FinalMerge(Global_Unified_U)   
+                Global_Unified_U = self.FinalMerge(Global_Unified_U, -1)   
             
             coef = self.field_net(Global_Unified_U)
         else:

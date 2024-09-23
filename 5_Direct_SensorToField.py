@@ -29,9 +29,9 @@ Case_Num = 300
 n_baseF = 40 
 n_cond = 9 #Length of the condition vector in U
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-field_idx = 0 # The field used for sparse reconstruction
+field_idx = 1 # The field used for sparse reconstruction
 
-N_selected = 25  # Points to be extracted for Y_select as "sensors"
+N_selected = 50  # Points to be extracted for Y_select as "sensors"
 N_P_Selected = 2000 # Points to evaluate loss in each epoch
 
 NET_TYPE = int(0) 
@@ -191,8 +191,15 @@ if __name__ == '__main__':
         
         combined_loss = train_loss_weight*Total_train_loss_Data + test_loss_weight*Total_test_loss_Data
 
+        end_time = time.time()
+        epoch_duration = end_time - start_time
+
         # Print and write to CSV 
         if (epoch + 1) % 20 == 0:
+
+            print(f'Epoch {epoch+1}/{N_EPOCH}, Duration: {epoch_duration:.4f} seconds')
+            print()
+
             print(f'Epoch {epoch+1}/{N_EPOCH}, Total Train Loss: {Total_train_loss_Data.item()}, Total Test Loss: {Total_test_loss_Data.item()}')
             for id, field_name in enumerate(field_names):
                 print(f'Train Loss for field {field_name}: {train_loss[id].item()}, Test Loss for field {field_name}: {test_loss[id].item()}')
@@ -232,8 +239,5 @@ if __name__ == '__main__':
                 if counter >= patience:
                     print("Early stopping triggered")
                     break
-
-            end_time = time.time()
-            epoch_duration = end_time - start_time
 
         torch.cuda.empty_cache()
