@@ -39,8 +39,8 @@ n_baseF      = 50
 n_cond       = 11 #Length of the condition vector in U
 
 field_idx    = 0 # The field used for sparse reconstruction
-N_selected   = 100 # Points selected for sparse reconstruction
-N_P_Selected = 2000 # points to evaluate performances
+N_selected   = 25 # Points selected for sparse reconstruction
+N_P_Selected = 1000 # points to evaluate performances
 #Transformer layer parameters
 num_heads    = 6
 num_layers   = 1
@@ -57,7 +57,7 @@ NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random
 NET_NAME = [f'MRPT_SensorToFeature_FromF{field_idx}_N{N_selected}_LoadFeature_STD', f'Direct_SensorToFeature_N{N_selected}_STD']
 
 PreTrained_Net_Name = 'net_MRPT_Standard_200_2_state_dict'
-Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
+Load_file_path = 'Output_Net/Pre-training/{}.pth'.format(PreTrained_Net_Name)
 
 
 def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360): # random sampling in each epoch

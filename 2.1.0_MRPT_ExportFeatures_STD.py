@@ -19,18 +19,20 @@ n_field_info = 36
 n_baseF = 50 
 
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-field_idx = 0 # The selected field for sparse reconstruction
 n_fields = len(field_names)
-N_selected = 50  
+
+field_idx = 0 # The selected field for sparse reconstruction
+N_selected = 25  
 N_P_Selected = 1000
 EVALUATION = True
+SAVE_Y_INDICE = True
 
 #Transformer layer parameters
 num_heads = 6
 num_layers = 1
 
 PreTrained_Net_Name = 'net_MRPT_Standard_200_2_state_dict'
-Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
+Load_file_path = 'Output_Net/Pre-training/{}.pth'.format(PreTrained_Net_Name)
 
 outFile = f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic'
 
@@ -104,6 +106,15 @@ if __name__ == '__main__':
         n_pointD = Y_train.shape[-1]
 
         Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected].numpy()
+
+        if SAVE_Y_INDICE is True:
+            # Save Y_select_indices to a file
+            with open(f'Y_Indice/Y_select_indices_{Case_Num}_{field_idx}_{N_selected}.pickle', 'wb') as f:
+                pickle.dump(Y_select_indices, f)
+            # # Load Y_select_indices from a file
+            # with open('Y_select_indices_{}.pickle'.format(Case_Num), 'rb') as f:
+            #     Y_select_indices = pickle.load(f)
+
         Yin_train = Y_train[:, Y_select_indices, :].to(device)
         Yin_test = Y_test[:, Y_select_indices, :].to(device)
         print('Y_train.shape = ', Y_train.shape)

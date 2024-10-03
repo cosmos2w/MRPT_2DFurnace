@@ -21,7 +21,7 @@ from constant import DataSplit
 from network import  Direct_SensorToField
 
 # Specify the GPUs to use
-device_ids = [2]
+device_ids = [1, 2]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 N_EPOCH = 200000
@@ -29,10 +29,13 @@ Case_Num = 300
 n_baseF = 40 
 n_cond = 9 #Length of the condition vector in U
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-field_idx = 1 # The field used for sparse reconstruction
+field_idx = 0 # The field used for sparse reconstruction
 
-N_selected = 50  # Points to be extracted for Y_select as "sensors"
+N_selected = 25  # Points to be extracted for Y_select as "sensors"
 N_P_Selected = 2000 # Points to evaluate loss in each epoch
+
+LOAD_INDICE = True
+Y_INDICE_NAME = 'Y_select_indices_300_0_25.pickle'
 
 NET_TYPE = int(0) 
                 # 0 = [Direct_SensorToField]; 
@@ -100,7 +103,13 @@ if __name__ == '__main__':
         n_inputF = U_train.shape[-1]
         n_pointD = Y_train.shape[-1]
 
-        Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected].numpy()
+        if LOAD_INDICE is True:
+            with open(f'Y_Indice/{Y_INDICE_NAME}', 'rb') as f:
+                Y_select_indices = pickle.load(f)
+                print(f'Loaded the Y_select_indices from {Y_INDICE_NAME}')
+        else:
+            Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected].numpy()
+
         Yin_train = Y_train[:, Y_select_indices, :].to(device)
         Yin_test = Y_test[:, Y_select_indices, :].to(device)
         print('Y_train.shape = ', Y_train.shape)
@@ -225,11 +234,12 @@ if __name__ == '__main__':
                 best_combined_loss = combined_loss
                 print(f'Best combined loss so far is {best_combined_loss}, still improving')
                 counter = 0
-                
-                with open('Output_Net/net_MultiField_{}.pic'.format(NET_NAME[NET_TYPE]), 'wb') as fp: #每隔一段时间更新网络 !!文件名需要记得修改!!
-                    pickle.dump(net, fp)
-                    print('...成功保存 net.pic')
-                    print()
+
+                model_save_path = f'Output_Net/net_{NET_NAME[NET_TYPE]}_state_dict.pth'
+                torch.save(net.module.state_dict(), model_save_path)
+                print('Successfully saved the latest best net at {}'.format(model_save_path))
+                print('...Successfully Saved net.pic')
+                print()
 
             else:
                 counter += 1
@@ -239,5 +249,3 @@ if __name__ == '__main__':
                 if counter >= patience:
                     print("Early stopping triggered")
                     break
-
-        torch.cuda.empty_cache()
