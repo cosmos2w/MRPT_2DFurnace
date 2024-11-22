@@ -7,34 +7,33 @@ import csv
 import torch
 import pickle
 from constant import DataSplit_F, DataSplit_STD
-from network import Mutual_Representation_PreTrain_Net
+from network import CoFFe_PreTrain_Net_MutualEncodingMode
 
 # Specify the GPUs to use
 device_ids = [0]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
-# Set the constants based on pre-training task
-Case_Num = 300
+#__________________________PARAMETERS_________________________________
+
+# Set the neccessary parameters based on the corresponding pre-training task
+
 n_field_info = 36
 n_baseF = 50 
-
-field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-n_fields = len(field_names)
-
-field_idx = 7 # The selected field for sparse reconstruction
-N_selected = 25  
-N_P_Selected = 1000
-EVALUATION = True
-SAVE_Y_INDICE = True
-
-#Transformer layer parameters
 num_heads = 6
 num_layers = 1
 
-PreTrained_Net_Name = 'net_MRPT_Standard_200_2_state_dict'
-Load_file_path = 'Output_Net/Pre-training/{}.pth'.format(PreTrained_Net_Name)
+field_idx   = 0     # The selected field for sparse reconstruction
+N_selected  = 25    # The number of random sensor points to be selected for sparse reconstruction
+field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 
-outFile = f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic'
+n_fields = len(field_names)
+N_P_Evaluation = 1000
+EVALUATION = True
+
+PreTrained_Net_Name = 'net_CoFFe_MutualEncodingMode_state_dict'
+Load_file_path = f'Output_Net/{PreTrained_Net_Name}.pth'
+outFile = f'data_split/CoFFe_MutualEncoding_Features_From{field_idx}_{N_selected}.pic'
+#____________________________________________________________________
 
 def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360): 
     num_examples = len(U)
@@ -45,7 +44,7 @@ def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360):
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
+        selected_points = torch.randperm(num_points)[:N_P_Evaluation].to(device)
         yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points), Yin.index_select(0, j), Gin.index_select(0, j)
 
 def custom_mse_loss(output, target, field_weights):
@@ -79,19 +78,19 @@ if __name__ == '__main__':
 
     for id in range(len(field_names) + 1):
         field_name_or_feature = 'Unified' if id == len(field_names) else field_names[id]
-        with open(f'LatentRepresentation/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}_STD.csv', 'wt') as fp: 
+        with open(f'LatentRepresentation/MutualEncodingMode/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv', 'wt') as fp: 
             pass
 
     # Load the pretrained net
-    PreTrained_net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
+    PreTrained_net = CoFFe_PreTrain_Net_MutualEncodingMode(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     state_dict = torch.load(Load_file_path)
     PreTrained_net.load_state_dict(state_dict)
 
-    field_weights = torch.tensor([1.0] * 9)  # Replace with actual weights if needed
+    field_weights = torch.tensor([1.0] * 9)  # Replace with modified weights if needed
     field_weights = field_weights.to(device)
 
     # Load the dataset of all fields
-    with open('data_split/data_split_Multi_{}.pic'.format(Case_Num), 'rb') as fp: 
+    with open('data_split/data_split.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train = data_split.U_train.to(device)
@@ -107,22 +106,14 @@ if __name__ == '__main__':
 
         Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected].numpy()
 
-        if SAVE_Y_INDICE is True:
-            # Save Y_select_indices to a file
-            with open(f'Y_Indice/Y_select_indices_{Case_Num}_{field_idx}_{N_selected}.pickle', 'wb') as f:
-                pickle.dump(Y_select_indices, f)
-            # # Load Y_select_indices from a file
-            # with open('Y_select_indices_{}.pickle'.format(Case_Num), 'rb') as f:
-            #     Y_select_indices = pickle.load(f)
-
         Yin_train = Y_train[:, Y_select_indices, :].to(device)
-        Yin_test = Y_test[:, Y_select_indices, :].to(device)
+        Yin_test  = Y_test[:, Y_select_indices, :].to(device)
         print('Y_train.shape = ', Y_train.shape)
         print('Yin_train.shape = ', Yin_train.shape)
 
         # Extract the temperature values (field_idx = 0) from G_train and G_test
         Gin_train = G_train[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  
-        Gin_test = G_test[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  
+        Gin_test  = G_test[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  
         print('Gin_Train.shape = ', Gin_train.shape)
     
     with torch.no_grad():
@@ -224,22 +215,22 @@ if __name__ == '__main__':
             std_U_Unified_train = info_train_std
             std_U_Unified_test  = info_test_std
 
-            Unified_mean_train = mean_train 
-            Unified_std_train  = std_train 
-            Unified_mean_test  = mean_test 
-            Unified_std_test   = std_test 
+            Unified_mean_train  = mean_train 
+            Unified_std_train   = std_train 
+            Unified_mean_test   = mean_test 
+            Unified_std_test    = std_test 
         else:
             std_field_info_train_tensors[f'field_info_{field_names[id]}'] = info_train_std
             std_field_info_test_tensors[f'field_info_{field_names[id]}']  = info_test_std
 
-            train_mean_tensors[f'field_info_{field_names[id]}'] = mean_train
-            train_std_tensors[f'field_info_{field_names[id]}']  = std_train
-            test_mean_tensors[f'field_info_{field_names[id]}']  = mean_test
-            test_std_tensors[f'field_info_{field_names[id]}']   = std_test
+            train_mean_tensors[f'field_info_{field_names[id]}']           = mean_train
+            train_std_tensors[f'field_info_{field_names[id]}']            = std_train
+            test_mean_tensors[f'field_info_{field_names[id]}']            = mean_test
+            test_std_tensors[f'field_info_{field_names[id]}']             = std_test
 
         print(f'Successfully Standardized FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}!')
 
-        with open(f'LatentRepresentation/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}_STD.csv', 'wt') as fp:
+        with open(f'LatentRepresentation/MutualEncodingMode/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv', 'wt') as fp:
             simple_writer = csv.writer(fp)
 
             fieldnames = ['U', 'field_info']
@@ -258,7 +249,7 @@ if __name__ == '__main__':
                 row = {'U': U_test[i].cpu().numpy().tolist(),
                     'field_info': info_test[i].cpu().numpy().tolist()}
                 writer.writerow(row)
-        print(f'Successfully export FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}_STD.csv!\n')
+        print(f'Successfully export FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv!\n')
 
     #   Export all the data to DataSplit for next-step training
     data_split = DataSplit_STD(

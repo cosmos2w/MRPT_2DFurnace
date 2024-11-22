@@ -372,7 +372,7 @@ class MLP(nn.Module):
             x = layer(x)
             if i < len(self.layers) - 1:
                 x = self.activation(x)
-                x = self.dropout(x)
+                # x = self.dropout(x)
         return x
 
 class MLP_SIG(nn.Module):
@@ -795,7 +795,8 @@ class Mutual_MultiEn_MultiDe_FineTune_Net(nn.Module):
 
             coef = self.field_net(Unified_Feature_output)
         else:
-            baseF = self.PosNet_Backup(Y)
+            # baseF = self.PosNet_Backup(Y)
+            baseF = self.PosNet(Y)
             # coef = self.CondNet_Backup(U)
             Gin_flatten = Gin.squeeze(-1)
             coef = self.CondNet_Backup(Gin_flatten)

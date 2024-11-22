@@ -1,13 +1,4 @@
 
-#__________________________________________________________________________________________________________________________________________
-# In this version, the code will load the pretrained net
-# Downstream tasks; Generate random sparse sensor points from the Data_split, recover the unified latent feature using a MLP, and then rebuild all the fields
-# The pre-trained features will be initially loaded and exported so that in sparse reconstruction phase there's no need to obtained the features from encoder in each epoch
-#__________________________________________________________________________________________________________________________________________
-
-import sys
-sys.path.append('..')
-
 import io
 import csv
 import time
@@ -20,45 +11,43 @@ import pickle
 
 from torch import nn 
 from constant import DataSplit_STD 
-from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference, Mutual_SensorToFeature_InterInference_LoadFeature_STD
+from network import Direct_SensorToFeature, CoFFe_PreTrain_Net_MutualEncodingMode, Finetuning_SensorToFeatures_MutualEncoding
 
 # Specify the GPUs to use
 device_ids = [0]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
-field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-n_fields    = len(field_names)
-N_EPOCH     = 1000000
-N_REPORT    = 10
-Case_Num    = 300
 
-EVALUATE     = True
-n_field_info = 36
-n_baseF      = 50 
-n_cond       = 11 #Length of the condition vector in U
-
-field_idx    = 0 # The field used for sparse reconstruction
-N_selected   = 25 # Points selected for sparse reconstruction
-N_P_Selected = 2000 # points to evaluate performances
-#Transformer layer parameters
-num_heads    = 6
-num_layers   = 1
-
-hidden_sizes = [600, 600]
-layer_sizes = [n_field_info * len(field_names)] + hidden_sizes + [n_field_info]  
-Final_layer_sizes = [n_field_info] + hidden_sizes + [n_field_info] 
+# Set the neccessary parameters based on corresponding pre-training task
+n_field_info   = 36
+n_baseF        = 50 
 
 Unifed_weight = 5.0
+field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
+n_fields    = len(field_names)
+
+field_idx      = 0      # The field used for sparse reconstruction
+N_selected     = 25     # Points selected for sparse reconstruction
+N_P_Evaluation = 2000   # points to evaluate performances
+num_heads      = 6
+num_layers     = 1
+
+N_EPOCH        = 1000
+N_REPORT       = 10
+EVALUATE       = True
+hidden_sizes   = [500, 500] # The size of hidden layers for the fine-tuning MLPs
+layer_sizes    = [n_field_info * n_fields] + hidden_sizes + [n_field_info]  
+Final_layer_sizes = [n_field_info] + hidden_sizes + [n_field_info] 
 
 NET_TYPE = int(0) 
-                # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
-NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_FromF{field_idx}_N{N_selected}_LoadFeature_STD_2', f'Direct_SensorToFeature_N{N_selected}_STD']
+                # 0 = [CoFFe_PreTrain_Net_MutualEncodingMode]; 1 = [Direct_SensorToFeature]
+NET_SETTINGS = f'Selecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\thidden_sizes = {hidden_sizes}\n'
+NET_NAME = [f'CoFFe_MutualEncoding_SensorToFeature_FromF{field_idx}_N{N_selected}', f'Direct_SensorToFeature_N{N_selected}']
 
-PreTrained_Net_Name = 'net_MRPT_Standard_200_2_state_dict'
-Load_file_path = 'Output_Net/Pre-training/{}.pth'.format(PreTrained_Net_Name)
-
+PreTrained_Net_Name = 'net_CoFFe_MutualEncodingMode_state_dict'
+Load_file_path = f'Output_Net/{PreTrained_Net_Name}.pth'
+#____________________________________________________________________
 
 def get_data_iter(LR, LR_F, U, Y, G, Yin, Gin, batch_size = 128): # random sampling in each epoch
     num_examples = len(U)
@@ -75,7 +64,7 @@ def get_data_iter(LR, LR_F, U, Y, G, Yin, Gin, batch_size = 128): # random sampl
             LR_F_id = LR_F[f'field_info_{field_names[id]}'].index_select(0, j)
             LR_Fs[f'field_info_{field_names[id]}'] = LR_F_id
 
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
+        selected_points = torch.randperm(num_points)[:N_P_Evaluation].to(device)
         yield  LR.index_select(0, j), LR_Fs, U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points), Yin.index_select(0, j), Gin.index_select(0, j)
 
 def custom_mse_loss(output, target, field_weights):
@@ -113,11 +102,11 @@ if __name__ == '__main__':
     if EVALUATE is True:
         with open(f'Loss_csv/train_test_loss_reconstruction/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
             pass
-        with open(f'LatentRepresentation/predictions_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
+        with open(f'LatentRepresentation/MutualEncodingMode/predictions_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
             pass
 
     # Load the pretrained net
-    PreTrained_net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
+    PreTrained_net = CoFFe_PreTrain_Net_MutualEncodingMode(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     state_dict = torch.load(Load_file_path)
     PreTrained_net.load_state_dict(state_dict)
 
@@ -128,7 +117,7 @@ if __name__ == '__main__':
     std_train_tensors = {}
     std_test_tensors = {}
 
-    with open(f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic', 'rb') as fp: 
+    with open(f'data_split/CoFFe_MutualEncoding_Features_From{field_idx}_{N_selected}.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train          = data_split.U_train.to(device)
@@ -294,7 +283,7 @@ if __name__ == '__main__':
 
     # Define the network
     if (NET_TYPE == 0):
-        net = Mutual_SensorToFeature_InterInference_LoadFeature_STD(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
+        net = Finetuning_SensorToFeatures_MutualEncoding(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
         # Fix the parameters in the petrained net
         for param in net.PreTrained_net.parameters():
             param.requires_grad = False
@@ -307,11 +296,11 @@ if __name__ == '__main__':
 
     # Wrap the model with DataParallel
     net = nn.DataParallel(net, device_ids=device_ids)
-    optimizer = optim.Adam(net.parameters(), lr=0.0002, weight_decay=5.0E-5) # , weight_decay=5.0E-5
+    optimizer = optim.Adam(net.parameters(), lr=0.0002, weight_decay=5.0E-5) 
 
     # Set up early stopping parameters
     patience = 100
-    best_combined_loss = float('5.0') #Initial threshold to determine early stopping
+    best_combined_loss = float('5.0') # Initial threshold to determine early stopping
     counter = 0
     train_loss_weight = 0.15
     test_loss_weight = 0.85
@@ -354,7 +343,6 @@ if __name__ == '__main__':
             if (NET_TYPE == 0): # This is only calculated when the Encoder is reused in fine-tuning stage
                 for id in range( len(field_names) ):
                     field_output = Predicted_Features[:, :, id]
-                    # field_target = field_info_train_tensors[f'field_info_{field_names[id]}']
                     field_target = LR_Fs[f'field_info_{field_names[id]}']
                     field_loss = criterion(field_output, field_target) 
                     train_losses[id] = field_loss.item()
@@ -377,7 +365,6 @@ if __name__ == '__main__':
                     baseF = PreTrained_net.PosNet(Y)
                     
                     unstandardized_train_output = unstandardize_features(Unified_Feature_output_train, mean_train_tensors[f'Unified'], std_train_tensors[f'Unified'])
-                    # unstandardized_train_output = unstandardize_features(LR_Unified_train, mean_train_tensors[f'Unified'], std_train_tensors[f'Unified'])                   
 
                     Global_Unified_field_outputs = []
                     for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
@@ -414,7 +401,6 @@ if __name__ == '__main__':
                 if (NET_TYPE == 0): # This is only calculated when the Encoder is reused in fine-tuning stage
                     for id in range( len(field_names) ):
                         field_output = Predicted_Features[:, :, id]
-                        # field_target = field_info_test_tensors[f'field_info_{field_names[id]}']
                         field_target = LR_Fs[f'field_info_{field_names[id]}']
                         field_loss = criterion(field_output, field_target)
                         test_losses[id] = field_loss.item()
@@ -429,7 +415,6 @@ if __name__ == '__main__':
                     baseF = PreTrained_net.PosNet(Y)
 
                     unstandardized_test_output = unstandardize_features(Unified_Feature_output_test, mean_test_tensors[f'Unified'], std_test_tensors[f'Unified'])
-                    # unstandardized_test_output = unstandardize_features(LR_Unified_test, mean_test_tensors[f'Unified'], std_test_tensors[f'Unified'])
                     
                     Global_Unified_field_outputs = []
                     for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
@@ -461,7 +446,6 @@ if __name__ == '__main__':
         end_time = time.time()  # End time measurement
         epoch_duration = end_time - start_time  # Calculate duration
 
-        # Print and write to CSV 
         if (epoch + 1) % N_REPORT == 0:
 
             print(f'Epoch {epoch+1}/{N_EPOCH}, Duration: {epoch_duration:.4f} seconds')
@@ -524,7 +508,7 @@ if __name__ == '__main__':
 
                 # Export the results to a new CSV file & evaluate the field-reconstruction performance
                 with torch.no_grad():
-                    with open(f'LatentRepresentation/predictions_{NET_NAME[NET_TYPE]}.csv', 'w', newline='') as file:
+                    with open(f'LatentRepresentation/MutualEncodingMode/predictions_{NET_NAME[NET_TYPE]}.csv', 'w', newline='') as file:
                         Predicted_Features_train, Unified_Feature_output_train = net(Yin_train, Gin_train, num_heads, mean_train_tensors, std_train_tensors)
                         Predicted_Features_test, Unified_Feature_output_test   = net(Yin_test, Gin_test, num_heads, mean_test_tensors, std_test_tensors)                        
                         csv_writer = csv.writer(file)

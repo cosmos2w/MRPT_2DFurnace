@@ -29,12 +29,12 @@ Case_Num = 300
 n_baseF = 40 
 n_cond = 9 #Length of the condition vector in U
 field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-field_idx = 0 # The field used for sparse reconstruction
+field_idx = 7 # The field used for sparse reconstruction
 
 N_selected = 25  # Points to be extracted for Y_select as "sensors"
 N_P_Selected = 2000 # Points to evaluate loss in each epoch
 
-LOAD_INDICE = True
+LOAD_INDICE = False
 Y_INDICE_NAME = 'Y_select_indices_300_0_25.pickle'
 
 NET_TYPE = int(0) 

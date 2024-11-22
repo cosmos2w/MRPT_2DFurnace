@@ -1,13 +1,4 @@
 
-#__________________________________________________________________________________________________________________________________________
-# In this version, the code will load the pretrained net
-# Downstream tasks; Generate random sparse sensor points from the Data_split, recover the unified latent feature using a MLP, and then rebuild all the fields
-# The pre-trained features will be initially loaded and exported so that in sparse reconstruction phase there's no need to obtained the features from encoder in each epoch
-#__________________________________________________________________________________________________________________________________________
-
-import sys
-sys.path.append('..')
-
 import io
 import csv
 import time
@@ -20,63 +11,55 @@ import pickle
 
 from torch import nn 
 from constant import DataSplit_STD 
-from network import Direct_SensorToFeature, Mutual_Representation_PreTrain_Net, Mutual_SensorToFeature_InterInference, Mutual_SensorToFeature_InterInference_LoadFeature_STD
+from network import CoFFe_PreTrain_Net_MutualDecodingMode, Finetuning_SensorToFeatures_MutualDecoding, Direct_SensorToFeature
 
 # Specify the GPUs to use
 device_ids = [0]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
 #__________________________PARAMETERS_________________________________
-field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-n_fields    = len(field_names)
-N_EPOCH     = 1000000
-N_REPORT    = 10
-Case_Num    = 300
 
-EVALUATE     = True
-n_field_info = 36
-n_baseF      = 50 
-n_cond       = 11 #Length of the condition vector in U
+# Set the neccessary parameters based on corresponding pre-training task
+n_field_info   = 36
+n_baseF        = 50 
 
-field_idx    = 0 # The field used for sparse reconstruction
-N_selected   = 25 # Points selected for sparse reconstruction
-N_P_Selected = 2000 # points to evaluate performances
-#Transformer layer parameters
-num_heads    = 6
-num_layers   = 1
+field_idx      = 0      # The field used for sparse reconstruction
+N_selected     = 25     # Points selected for sparse reconstruction
+N_P_Evaluation = 2000   # points to evaluate performances
+num_heads      = 6
+num_layers     = 1
 
-hidden_sizes = [600, 600]
-layer_sizes = [n_field_info * len(field_names)] + hidden_sizes + [n_field_info]  
+N_EPOCH        = 1000
+N_REPORT       = 10
+EVALUATE       = True
+hidden_sizes   = [500, 500] # The size of hidden layers for the fine-tuning MLPs
+layer_sizes    = [n_field_info] + hidden_sizes + [n_field_info]  
 Final_layer_sizes = [n_field_info] + hidden_sizes + [n_field_info] 
 
 Unifed_weight = 5.0
+field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
+n_fields    = len(field_names)
 
 NET_TYPE = int(0) 
-                # 0 = [Mutual_Representation_PreTrain_Net]; 1 = [Direct_SensorToFeature]
-NET_SETTINGS = f'LR = 5E-4, weight_decay = 5.0E-5\tSelecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\thidden_sizes = {hidden_sizes}\n'
-NET_NAME = [f'MRPT_SensorToFeature_FromF{field_idx}_N{N_selected}_LoadFeature_STD_2', f'Direct_SensorToFeature_N{N_selected}_STD']
+                # 0 = [CoFFe_PreTrain_Net_MutualDecodingMode]; 1 = [Direct_SensorToFeature]
+NET_SETTINGS = f'Selecting {N_selected} random sensors from {field_names[field_idx]} to recover the latent features\thidden_sizes = {hidden_sizes}\n'
+NET_NAME = [f'CoFFe_MutualDecoding_SensorToFeature_FromF{field_idx}_N{N_selected}', f'Direct_SensorToFeature_N{N_selected}']
 
-PreTrained_Net_Name = 'net_MRPT_Standard_200_2_state_dict'
-Load_file_path = 'Output_Net/Pre-training/{}.pth'.format(PreTrained_Net_Name)
+PreTrained_Net_Name = 'net_CoFFe_MutualDecodingMode_state_dict'
+Load_file_path = 'Output_Net/{}.pth'.format(PreTrained_Net_Name)
+#____________________________________________________________________
 
-
-def get_data_iter(LR, LR_F, U, Y, G, Yin, Gin, batch_size = 128): # random sampling in each epoch
+def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360): # random sampling in each epoch
     num_examples = len(U)
     num_points = Y.shape[1]
     indices = list(range(num_examples))
-    LR_Fs = {}
 
-    np.random.shuffle(indices) 
     for i in range(0, num_examples, batch_size):
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
-        for id in range( len(field_names) ):
-            LR_F_id = LR_F[f'field_info_{field_names[id]}'].index_select(0, j)
-            LR_Fs[f'field_info_{field_names[id]}'] = LR_F_id
-
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
-        yield  LR.index_select(0, j), LR_Fs, U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points), Yin.index_select(0, j), Gin.index_select(0, j)
+        selected_points = torch.randperm(num_points)[:N_P_Evaluation].to(device)
+        yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points), Yin.index_select(0, j), Gin.index_select(0, j)
 
 def custom_mse_loss(output, target, field_weights):
 
@@ -113,11 +96,11 @@ if __name__ == '__main__':
     if EVALUATE is True:
         with open(f'Loss_csv/train_test_loss_reconstruction/Reconstruct_loss_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
             pass
-        with open(f'LatentRepresentation/predictions_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
+        with open(f'LatentRepresentation/MutualDecodingMode/predictions_{NET_NAME[NET_TYPE]}.csv', 'wt') as fp:
             pass
 
     # Load the pretrained net
-    PreTrained_net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
+    PreTrained_net = CoFFe_PreTrain_Net_MutualDecodingMode(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     state_dict = torch.load(Load_file_path)
     PreTrained_net.load_state_dict(state_dict)
 
@@ -128,7 +111,7 @@ if __name__ == '__main__':
     std_train_tensors = {}
     std_test_tensors = {}
 
-    with open(f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic', 'rb') as fp: 
+    with open(f'data_split/CoFFe_MutualDecoding_Features_From{field_idx}_{N_selected}.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train          = data_split.U_train.to(device)
@@ -289,12 +272,10 @@ if __name__ == '__main__':
         print('LR_Unified_train.shape is ', LR_Unified_train.shape)
         print('MEAN_Unified_train.shape is ', MEAN_Unified_train.shape)
         print('STD_Unified_train.shape is ', STD_Unified_train.shape)
-        # print('LR_Unified_train is: ', LR_Unified_train)
-        # exit()
 
     # Define the network
     if (NET_TYPE == 0):
-        net = Mutual_SensorToFeature_InterInference_LoadFeature_STD(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
+        net = Finetuning_SensorToFeatures_MutualDecoding(layer_sizes, Final_layer_sizes, PreTrained_net).to(device)
         # Fix the parameters in the petrained net
         for param in net.PreTrained_net.parameters():
             param.requires_grad = False
@@ -307,7 +288,7 @@ if __name__ == '__main__':
 
     # Wrap the model with DataParallel
     net = nn.DataParallel(net, device_ids=device_ids)
-    optimizer = optim.Adam(net.parameters(), lr=0.0002, weight_decay=5.0E-5) # , weight_decay=5.0E-5
+    optimizer = optim.Adam(net.parameters(), lr=0.0005, weight_decay=1.0E-4) # , weight_decay=5.0E-5
 
     # Set up early stopping parameters
     patience = 100
@@ -336,7 +317,7 @@ if __name__ == '__main__':
 
         start_time = time.time()  # Start time measurement
 
-        for LR, LR_Fs, U, Y, G, Yin, Gin in get_data_iter(LR_Unified_train, field_info_train_tensors, U_train, Y_train, G_train, Yin_train, Gin_train):
+        for U, Y, G, Yin, Gin in get_data_iter(U_train, Y_train, G_train, Yin_train, Gin_train):
             loss = 0.0
             optimizer.zero_grad()
 
@@ -344,7 +325,7 @@ if __name__ == '__main__':
             # Entering the training phase:
             #----------------------------
             if (NET_TYPE == 0):
-                Predicted_Features, Unified_Feature_output_train = net(Yin, Gin, num_heads, mean_train_tensors, std_train_tensors)
+                Predicted_Features, Unified_Feature_output_train = net(Yin, Gin, num_heads, field_idx, mean_train_tensors, std_train_tensors)
             elif (NET_TYPE == 1):
                 Unified_Feature_output_train = net(Yin, Gin)
             else:
@@ -354,15 +335,14 @@ if __name__ == '__main__':
             if (NET_TYPE == 0): # This is only calculated when the Encoder is reused in fine-tuning stage
                 for id in range( len(field_names) ):
                     field_output = Predicted_Features[:, :, id]
-                    # field_target = field_info_train_tensors[f'field_info_{field_names[id]}']
-                    field_target = LR_Fs[f'field_info_{field_names[id]}']
+                    field_target = field_info_train_tensors[f'field_info_{field_names[id]}']
                     field_loss = criterion(field_output, field_target) 
                     train_losses[id] = field_loss.item()
                     
                     train_loss += field_loss
                     loss += field_weights[id] * field_loss
 
-            mse_loss_Unifed_train = criterion(Unified_Feature_output_train, LR)
+            mse_loss_Unifed_train = criterion(Unified_Feature_output_train, LR_Unified_train)
 
             train_losses[ len(field_names) ] = mse_loss_Unifed_train
             train_loss += mse_loss_Unifed_train
@@ -377,7 +357,6 @@ if __name__ == '__main__':
                     baseF = PreTrained_net.PosNet(Y)
                     
                     unstandardized_train_output = unstandardize_features(Unified_Feature_output_train, mean_train_tensors[f'Unified'], std_train_tensors[f'Unified'])
-                    # unstandardized_train_output = unstandardize_features(LR_Unified_train, mean_train_tensors[f'Unified'], std_train_tensors[f'Unified'])                   
 
                     Global_Unified_field_outputs = []
                     for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
@@ -402,9 +381,9 @@ if __name__ == '__main__':
         #   Entering the test phase:
         #----------------------------
         with torch.no_grad():  
-            for LR, LR_Fs, U, Y, G, Yin, Gin in get_data_iter(LR_Unified_test, field_info_test_tensors, U_test, Y_test, G_test, Yin_test, Gin_test):
+            for U, Y, G, Yin, Gin in get_data_iter(U_test, Y_test, G_test, Yin_test, Gin_test):
                 if (NET_TYPE == 0):
-                    Predicted_Features, Unified_Feature_output_test = net(Yin, Gin, num_heads, mean_test_tensors, std_test_tensors)
+                    Predicted_Features, Unified_Feature_output_test = net(Yin, Gin, num_heads, field_idx, mean_test_tensors, std_test_tensors)
                 elif (NET_TYPE == 1):
                     Unified_Feature_output_test = net(Yin, Gin)
                 else:
@@ -414,14 +393,13 @@ if __name__ == '__main__':
                 if (NET_TYPE == 0): # This is only calculated when the Encoder is reused in fine-tuning stage
                     for id in range( len(field_names) ):
                         field_output = Predicted_Features[:, :, id]
-                        # field_target = field_info_test_tensors[f'field_info_{field_names[id]}']
-                        field_target = LR_Fs[f'field_info_{field_names[id]}']
+                        field_target = field_info_test_tensors[f'field_info_{field_names[id]}']
                         field_loss = criterion(field_output, field_target)
                         test_losses[id] = field_loss.item()
                         
                         test_loss += field_loss
                 
-                mse_loss_Unifed_test = criterion(Unified_Feature_output_test, LR)
+                mse_loss_Unifed_test = criterion(Unified_Feature_output_test, LR_Unified_test)
                 test_losses[ len(field_names) ] = mse_loss_Unifed_test
                 test_loss += mse_loss_Unifed_test
 
@@ -429,8 +407,7 @@ if __name__ == '__main__':
                     baseF = PreTrained_net.PosNet(Y)
 
                     unstandardized_test_output = unstandardize_features(Unified_Feature_output_test, mean_test_tensors[f'Unified'], std_test_tensors[f'Unified'])
-                    # unstandardized_test_output = unstandardize_features(LR_Unified_test, mean_test_tensors[f'Unified'], std_test_tensors[f'Unified'])
-                    
+
                     Global_Unified_field_outputs = []
                     for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
                         coef = field_net(unstandardized_test_output)
@@ -524,21 +501,19 @@ if __name__ == '__main__':
 
                 # Export the results to a new CSV file & evaluate the field-reconstruction performance
                 with torch.no_grad():
-                    with open(f'LatentRepresentation/predictions_{NET_NAME[NET_TYPE]}.csv', 'w', newline='') as file:
-                        Predicted_Features_train, Unified_Feature_output_train = net(Yin_train, Gin_train, num_heads, mean_train_tensors, std_train_tensors)
-                        Predicted_Features_test, Unified_Feature_output_test   = net(Yin_test, Gin_test, num_heads, mean_test_tensors, std_test_tensors)                        
+                    with open(f'LatentRepresentation/MutualDecodingMode/predictions_{NET_NAME[NET_TYPE]}.csv', 'w', newline='') as file:
                         csv_writer = csv.writer(file)
                         csv_writer.writerow(['u_data', 'Global_Unified_U', 'Predicted_Global_Unified_U'])
                         csv_writer.writerow(['Training:'])
-                        for i in range(U_train.shape[0]):
-                            row = [U_train[i].cpu().numpy().tolist(),
+                        for i in range(U.shape[0]):
+                            row = [U[i].cpu().numpy().tolist(),
                                 LR_Unified_train[i].cpu().numpy().tolist(),
                                 Unified_Feature_output_train[i].cpu().numpy().tolist()]
                             csv_writer.writerow(row)
 
                         csv_writer.writerow(['Testing:'])
-                        for i in range(U_test.shape[0]):
-                            row = [U_test[i].cpu().numpy().tolist(),
+                        for i in range(U.shape[0]):
+                            row = [U[i].cpu().numpy().tolist(),
                                 LR_Unified_test[i].cpu().numpy().tolist(),
                                 Unified_Feature_output_test[i].cpu().numpy().tolist()]
                             csv_writer.writerow(row)

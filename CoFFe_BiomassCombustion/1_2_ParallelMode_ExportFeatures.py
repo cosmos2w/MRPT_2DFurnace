@@ -1,40 +1,35 @@
-
-import sys
-sys.path.append('..')
-
 import os
 import csv
 import torch
 import pickle
 from constant import DataSplit_F, DataSplit_STD
-from network import Mutual_Representation_PreTrain_Net
+from network import CoFFe_PreTrain_Net_ParallelMode
 
 # Specify the GPUs to use
 device_ids = [0]
 device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
 
-# Set the constants based on pre-training task
-Case_Num = 300
+#__________________________PARAMETERS_________________________________
+
+# Set the neccessary parameters based on the corresponding pre-training task
+
 n_field_info = 36
 n_baseF = 50 
-
-field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
-n_fields = len(field_names)
-
-field_idx = 7 # The selected field for sparse reconstruction
-N_selected = 25  
-N_P_Selected = 1000
-EVALUATION = True
-SAVE_Y_INDICE = True
-
-#Transformer layer parameters
 num_heads = 6
 num_layers = 1
 
-PreTrained_Net_Name = 'net_MRPT_Standard_200_2_state_dict'
-Load_file_path = 'Output_Net/Pre-training/{}.pth'.format(PreTrained_Net_Name)
+field_idx   = 0     # The selected field for sparse reconstruction
+N_selected  = 25    # The number of random sensor points to be selected for sparse reconstruction
+field_names = ['T', 'P', 'Vx', 'Vy', 'O2', 'CO2', 'H2O', 'CO', 'H2']
 
-outFile = f'data_split/data_split_MRPT_Features_{Case_Num}_{field_idx}_{N_selected}_STD.pic'
+n_fields = len(field_names)
+N_P_Evaluation = 1000
+EVALUATION = True
+
+PreTrained_Net_Name = 'net_CoFFe_ParallelMode_state_dict'
+Load_file_path = f'Output_Net/{PreTrained_Net_Name}.pth'
+outFile = f'data_split/CoFFe_Parallel_Features_From{field_idx}_{N_selected}.pic'
+#____________________________________________________________________
 
 def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360): 
     num_examples = len(U)
@@ -45,10 +40,10 @@ def get_data_iter(U, Y, G, Yin, Gin, batch_size = 360):
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) 
         j = j.to(device)
 
-        selected_points = torch.randperm(num_points)[:N_P_Selected].to(device)
+        selected_points = torch.randperm(num_points)[:N_P_Evaluation].to(device)
         yield  U.index_select(0, j), Y.index_select(0, j).index_select(1, selected_points), G.index_select(0, j).index_select(1, selected_points), Yin.index_select(0, j), Gin.index_select(0, j)
 
-def custom_mse_loss(output, target, field_weights):
+def field_mse_loss(output, target, field_weights):
 
     num_fields = target.size(-1)
     total_loss = 0
@@ -79,19 +74,19 @@ if __name__ == '__main__':
 
     for id in range(len(field_names) + 1):
         field_name_or_feature = 'Unified' if id == len(field_names) else field_names[id]
-        with open(f'LatentRepresentation/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}_STD.csv', 'wt') as fp: 
+        with open(f'LatentRepresentation/ParallelMode/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv', 'wt') as fp: 
             pass
 
     # Load the pretrained net
-    PreTrained_net = Mutual_Representation_PreTrain_Net(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
+    PreTrained_net = CoFFe_PreTrain_Net_ParallelMode(n_field_info, n_baseF, num_heads, num_layers, num_fields=len(field_names)).to(device)
     state_dict = torch.load(Load_file_path)
     PreTrained_net.load_state_dict(state_dict)
 
-    field_weights = torch.tensor([1.0] * 9)  # Replace with actual weights if needed
+    field_weights = torch.tensor([1.0] * 9)  # Replace with modified weights if needed
     field_weights = field_weights.to(device)
 
     # Load the dataset of all fields
-    with open('data_split/data_split_Multi_{}.pic'.format(Case_Num), 'rb') as fp: 
+    with open('data_split/data_split.pic', 'rb') as fp: 
         data_split = pickle.load(fp)
 
         U_train = data_split.U_train.to(device)
@@ -102,25 +97,13 @@ if __name__ == '__main__':
         Y_test = data_split.Y_test.to(device)
         G_test = data_split.G_test.to(device)
 
-        n_inputF = U_train.shape[-1]
-        n_pointD = Y_train.shape[-1]
-
         Y_select_indices = torch.randperm(Y_train.size(1))[:N_selected].numpy()
-
-        if SAVE_Y_INDICE is True:
-            # Save Y_select_indices to a file
-            with open(f'Y_Indice/Y_select_indices_{Case_Num}_{field_idx}_{N_selected}.pickle', 'wb') as f:
-                pickle.dump(Y_select_indices, f)
-            # # Load Y_select_indices from a file
-            # with open('Y_select_indices_{}.pickle'.format(Case_Num), 'rb') as f:
-            #     Y_select_indices = pickle.load(f)
-
         Yin_train = Y_train[:, Y_select_indices, :].to(device)
         Yin_test = Y_test[:, Y_select_indices, :].to(device)
         print('Y_train.shape = ', Y_train.shape)
         print('Yin_train.shape = ', Yin_train.shape)
 
-        # Extract the temperature values (field_idx = 0) from G_train and G_test
+        # Extract the selected field values (field_idx) from G_train and G_test
         Gin_train = G_train[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  
         Gin_test = G_test[:, Y_select_indices, field_idx].unsqueeze(-1).to(device)  
         print('Gin_Train.shape = ', Gin_train.shape)
@@ -129,31 +112,24 @@ if __name__ == '__main__':
         for U, Y, G, Yin, Gin in get_data_iter(U_train, Y_train, G_train, Yin_train, Gin_train):
 
             baseF = PreTrained_net.PosNet(Y)   #   [n_batch, np_selected, n_dim -> n_base]
-            U_Unified_list_train = []
-            for id in range(n_fields):   # Reconstructing the id(th) field
-                field_info = PreTrained_net._compress_data(baseF, G, id, num_heads) # [n_batch, n_field_info, n_fields]: The latent representations from one Encoder towards the id(th) field
-                
-                U_Unified = PreTrained_net.FieldMerges[id](field_info, id) #   [n_batch, n_field_info]: Unified latent representations from one Encoder towards the id(th) field
-                U_Unified_list_train.append(U_Unified)
-
-            ALL_Unified_U_train = torch.stack(U_Unified_list_train, dim=2) #   [n_batch, n_field_info, n_fields]
-            print('In train set, ALL_Unified_U_train.shape is ', ALL_Unified_U_train.shape)
-            Global_Unified_U_train = PreTrained_net.FinalMerge(ALL_Unified_U_train, -1)   #   [n_batch, n_field_info]
-            print('In train set, Global_Unified_U_train.shape is ', Global_Unified_U_train.shape)
+            FieldInfo_train = PreTrained_net._compress_data(baseF, G, num_heads)
+            print('In train set, FieldInfo_train.shape is ', FieldInfo_train.shape)
+            Unified_FieldInfo_train = PreTrained_net.FinalMerge(FieldInfo_train, -1)   #   [n_batch, n_field_info]
+            print('In train set, Unified_FieldInfo_train.shape is ', Unified_FieldInfo_train.shape)
 
             if EVALUATION is True:
                 Total_Field_train_loss_Data = 0.0
                 Field_train_loss = torch.zeros(len(field_names), device=device)  # [len(field_names), len(field_names)]
 
-                Global_Unified_field_outputs = []   # This means, the field output is decoded from the "Global_Unified" feature
+                Unified_field_outputs = []   # This means, the field output is decoded from the "Unified" feature
                 for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
-                    coef = field_net(Global_Unified_U_train)
+                    coef = field_net(Unified_FieldInfo_train)
                     combine = coef * baseF
-                    Global_Unified_field_output = torch.sum(combine, dim=2, keepdim=True)
-                    Global_Unified_field_outputs.append(Global_Unified_field_output)
-                Global_Unified_Gout = torch.cat(Global_Unified_field_outputs, dim=-1) #   All the field_idx(th) field results from Global_Unified_U
+                    Unified_field_output = torch.sum(combine, dim=2, keepdim=True)
+                    Unified_field_outputs.append(Unified_field_output)
+                Unified_Gout_train = torch.cat(Unified_field_outputs, dim=-1) #   All the field_idx(th) field results from Unified_U
 
-                field_loss_data, field_losses = custom_mse_loss(Global_Unified_Gout, G, field_weights)
+                field_loss_data, field_losses = field_mse_loss(Unified_Gout_train, G, field_weights)
                 Total_Field_train_loss_Data = field_loss_data
                 for j, loss_item in enumerate(field_losses):
                     Field_train_loss[j] = loss_item                
@@ -166,31 +142,24 @@ if __name__ == '__main__':
         for U, Y, G, Yin, Gin in get_data_iter(U_test, Y_test, G_test, Yin_test, Gin_test):
 
             baseF = PreTrained_net.PosNet(Y)   #   [n_batch, np_selected, n_dim -> n_base]
-            U_Unified_list_test = []
-            for id in range(n_fields):   # Reconstructing the id(th) field
-                field_info = PreTrained_net._compress_data(baseF, G, id, num_heads) # [n_batch, n_field_info, n_fields]: The latent representations from one Encoder towards the id(th) field
-                
-                U_Unified = PreTrained_net.FieldMerges[id](field_info, id) #   [n_batch, n_field_info]: Unified latent representations from one Encoder towards the id(th) field
-                U_Unified_list_test.append(U_Unified)
-
-            ALL_Unified_U_test = torch.stack(U_Unified_list_test, dim=2) #   [n_batch, n_field_info, n_fields]
-            print('In test set, ALL_Unified_U_test.shape is ', ALL_Unified_U_test.shape)
-            Global_Unified_U_test = PreTrained_net.FinalMerge(ALL_Unified_U_test, -1)   #   [n_batch, n_field_info]
-            print('In test set, Global_Unified_U_test.shape is ', Global_Unified_U_test.shape)
+            FieldInfo_test = PreTrained_net._compress_data(baseF, G, num_heads)
+            print('In test set, FieldInfo_test.shape is ', FieldInfo_test.shape)
+            Unified_FieldInfo_test = PreTrained_net.FinalMerge(FieldInfo_test, -1)   #   [n_batch, n_field_info]
+            print('In test set, Unified_FieldInfo_test.shape is ', Unified_FieldInfo_test.shape)
 
             if EVALUATION is True:
                 Total_Field_test_loss_Data = 0.0
-                Field_test_loss = torch.zeros(len(field_names), device=device)  # [len(field_names), len(field_names)]
+                Field_test_loss = torch.zeros(len(field_names), device=device)  
 
-                Global_Unified_field_outputs = [] # This means, the field output is decoded from the "Global_Unified" feature
-                for field_name, field_net in PreTrained_net.field_nets.items(): # Generate all the fields
-                    coef = field_net(Global_Unified_U_test)
+                Unified_field_outputs = [] 
+                for field_name, field_net in PreTrained_net.field_nets.items(): 
+                    coef = field_net(Unified_FieldInfo_test)
                     combine = coef * baseF
-                    Global_Unified_field_output = torch.sum(combine, dim=2, keepdim=True)
-                    Global_Unified_field_outputs.append(Global_Unified_field_output)
-                Global_Unified_Gout = torch.cat(Global_Unified_field_outputs, dim=-1) #   All the field_idx(th) field results from Global_Unified_U
+                    Unified_field_output = torch.sum(combine, dim=2, keepdim=True)
+                    Unified_field_outputs.append(Unified_field_output)
+                Unified_Gout_test = torch.cat(Unified_field_outputs, dim=-1) 
 
-                field_loss_data, field_losses = custom_mse_loss(Global_Unified_Gout, G, field_weights)
+                field_loss_data, field_losses = field_mse_loss(Unified_Gout_test, G, field_weights)
                 Total_Field_test_loss_Data = field_loss_data
                 for j, loss_item in enumerate(field_losses):
                     Field_test_loss[j] = loss_item                
@@ -213,8 +182,8 @@ if __name__ == '__main__':
         # Determine field name or unified feature
         field_name_or_feature = 'Unified' if id == len(field_names) else field_names[id]
         
-        info_train = Global_Unified_U_train if id == len(field_names) else ALL_Unified_U_train[:, :, id]
-        info_test  = Global_Unified_U_test  if id == len(field_names) else ALL_Unified_U_test[:, :, id]
+        info_train = Unified_FieldInfo_train if id == len(field_names) else FieldInfo_train[:, :, id]
+        info_test  = Unified_FieldInfo_test  if id == len(field_names) else FieldInfo_test[:, :, id]
 
         #   Perform standardization for the latent representations
         info_train_std, mean_train, std_train = standardize_features(info_train)
@@ -239,7 +208,7 @@ if __name__ == '__main__':
 
         print(f'Successfully Standardized FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}!')
 
-        with open(f'LatentRepresentation/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}_STD.csv', 'wt') as fp:
+        with open(f'LatentRepresentation/ParallelMode/FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv', 'wt') as fp:
             simple_writer = csv.writer(fp)
 
             fieldnames = ['U', 'field_info']
@@ -258,7 +227,7 @@ if __name__ == '__main__':
                 row = {'U': U_test[i].cpu().numpy().tolist(),
                     'field_info': info_test[i].cpu().numpy().tolist()}
                 writer.writerow(row)
-        print(f'Successfully export FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}_STD.csv!\n')
+        print(f'Successfully export FeaturesFrom_{PreTrained_Net_Name}_To_{field_name_or_feature}.csv!\n')
 
     #   Export all the data to DataSplit for next-step training
     data_split = DataSplit_STD(
