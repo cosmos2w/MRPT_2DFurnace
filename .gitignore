@@ -3,15 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# data
-data_split/
 # temp workaround for wlz's weird data file arrangements
 *.pic
 *.csv
-
-Output_Net/
 *.pth
-
 Y_Indice/
 *.pkl
 
