@@ -20,4 +20,4 @@ All data files are saved in `.pic` format and can be read using the `pickle` pac
 
 ### Note:
 
-Existing files in these directories are for reference only and showcase the type of content stored ! ! !
+For complete dataset or seeking for expansion on the current application, please contact wanglz@mit.edu
