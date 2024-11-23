@@ -106,9 +106,11 @@ Users can modify and test them according to their own needs.
 ## Data Availability
 
 This project provides three datasets, placed in the corresponding folders, available for download and use:
-- `CoFFe_BiomassCombustion/Data/`
-- `CoFFe_Electrolyzer/Data/`
-- `CoFFe_ParticleDegradation/Data/`
+- `CoFFe_BiomassCombustion/data_split/`
+- `CoFFe_Electrolyzer/data_split/`
+- `CoFFe_ParticleDegradation/data_split/`
+
+Note: Owing to the limitation of data size, complete dataset will be proveded upon request.
 
 ## Contact Information
 

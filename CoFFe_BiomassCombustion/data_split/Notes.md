@@ -21,3 +21,5 @@ All data files are saved in `.pic` format and can be read using the `pickle` pac
 ### Note:
 
 For complete dataset or seeking for expansion on the current application, please contact wanglz@mit.edu
+Once obtaining the datasets in thr format of `.pic`, just put them in this folder
+If the name of dataset file is altered, need to update the information before runing the scripts.
