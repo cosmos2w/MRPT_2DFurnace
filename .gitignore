@@ -10,6 +10,8 @@ __pycache__/
 Y_Indice/
 *.pkl
 
+OriginalMRPT/
+
 #   Codes only for special cases
 2.1.0_MRPT_ExportFeatures_DuelSensor_STD.py
 2.1.1_MRPT_Sparse_Reconstruction_DualSensor.py
